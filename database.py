@@ -189,6 +189,17 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Add new columns if they don't exist
+        try:
+            cur.execute("ALTER TABLE ai_gallery ADD COLUMN saved BOOLEAN DEFAULT FALSE")
+        except Exception:
+            if USE_POSTGRES:
+                conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ai_gallery ADD COLUMN bottle_type TEXT DEFAULT ''")
+        except Exception:
+            if USE_POSTGRES:
+                conn.rollback()
         
         cur.execute('''
             CREATE TABLE IF NOT EXISTS blog_articles (
