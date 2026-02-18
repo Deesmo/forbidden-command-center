@@ -987,6 +987,20 @@ def api_generate_image():
                 else:
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1024'
                     
+                    # Build a strict preservation prompt that tells the AI
+                    # to keep the bottle EXACTLY as-is and only change the scene
+                    ref_prompt = (
+                        "CRITICAL INSTRUCTION: The attached photo shows the EXACT Forbidden Bourbon bottle. "
+                        "You MUST preserve this bottle with PIXEL-PERFECT accuracy. Do NOT change ANYTHING about the bottle: "
+                        "keep the EXACT label text ('BOLD & ELEGANT' at top, 'FORBIDDEN' in large gold letters, "
+                        "'STRAIGHT BOURBON WHISKEY' below, barrel badge in center, '100 PROOF' on neck band, "
+                        "'750ML' size marking). Keep the EXACT hexagonal/faceted glass shape, the EXACT amber liquid color, "
+                        "the EXACT wooden cap, the EXACT gold foil details, the EXACT proportions. "
+                        "DO NOT reimagine, redraw, or artistically interpret the bottle — place it EXACTLY as photographed. "
+                        "The bottle is SACRED and UNCHANGEABLE. "
+                        f"SCENE/BACKGROUND ONLY: {prompt}"
+                    )
+                    
                     with open(bottle_path, 'rb') as img_file:
                         mime = 'image/png' if bottle_path.endswith('.png') else 'image/jpeg'
                         ext = 'png' if bottle_path.endswith('.png') else 'jpg'
@@ -998,7 +1012,7 @@ def api_generate_image():
                             },
                             data={
                                 'model': 'gpt-image-1',
-                                'prompt': prompt,
+                                'prompt': ref_prompt,
                                 'n': '1',
                                 'size': gpt_size,
                                 'quality': quality if quality in ('low', 'medium', 'high') else 'high',
@@ -1040,12 +1054,25 @@ def api_generate_image():
             try:
                 gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1024'
                 
+                # If no reference image, describe the bottle precisely
+                text_prompt = (
+                    "Photorealistic image of the Forbidden Bourbon bottle — an ultra-premium straight bourbon whiskey. "
+                    "The bottle has a distinctive hexagonal/faceted crystal glass shape with angular geometric panels. "
+                    "Label details: black label with 'BOLD & ELEGANT' in small gold text at very top, "
+                    "'FORBIDDEN' in large ornate gold serif letters as the main brand name, "
+                    "'STRAIGHT BOURBON WHISKEY' in gold capitals below, a small barrel/cask badge emblem in the center, "
+                    "and a rectangular proof badge reading '100 PROOF | 750ML' near the bottom. "
+                    "The bottle has a dark wooden/cork stopper cap with gold neck band. "
+                    "Liquid is rich deep amber/copper colored. "
+                    f"Scene: {prompt}"
+                )
+                
                 resp = req.post(
                     'https://api.openai.com/v1/images/generations',
                     headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
                     json={
                         'model': 'gpt-image-1',
-                        'prompt': prompt,
+                        'prompt': text_prompt,
                         'n': 1,
                         'size': gpt_size,
                         'quality': quality if quality in ('low', 'medium', 'high') else 'high',
