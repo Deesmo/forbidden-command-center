@@ -196,7 +196,9 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'ArrowLeft') navLightbox(-1);
     if (e.key === 'ArrowRight') navLightbox(1);
 });
-
-loadGallery();
 </script>
+{% endblock %}
+
+{% block scripts %}
+<script>loadGallery();</script>
 {% endblock %}
