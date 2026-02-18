@@ -945,7 +945,7 @@ def api_generate_image():
     """Generate a product image using COMPOSITE approach:
     1. AI generates ONLY the background scene (no bottle)
     2. Real bottle photo gets background removed (cutout)
-    3. Real bottle composited onto AI scene
+    3. Real bottle composited onto AI scene with shadow + reflection
     Result: 100% accurate bottle + creative AI backgrounds
     """
     try:
@@ -955,7 +955,8 @@ def api_generate_image():
         quality = data.get('quality', 'high')
         use_reference = data.get('use_reference', True)
         bottle_position = data.get('bottle_position', 'center')
-        bottle_scale = data.get('bottle_scale', 0.55)
+        bottle_scale = data.get('bottle_scale', 0.65)
+        bottle_type = data.get('bottle_type', 'small_batch')  # small_batch or single_barrel
         
         if not prompt:
             return jsonify({'success': False, 'error': 'Prompt required'}), 400
@@ -977,55 +978,78 @@ def api_generate_image():
         # =====================================================
         if use_reference:
             try:
-                from PIL import Image as PILImage
+                from PIL import Image as PILImage, ImageFilter, ImageEnhance
                 import numpy as np
+                import io
                 
-                # Step 1: Get/create bottle cutout (cached)
-                cutout_path = os.path.join(app.static_folder, 'photos', 'bottle-cutout.png')
+                # Step 1: Get/create bottle cutout (cached per bottle type)
+                cutout_suffix = 'sb' if bottle_type == 'small_batch' else 'sgl'
+                cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}.png')
+                
                 if not os.path.exists(cutout_path):
-                    # Find best source photo (light background)
-                    source_candidates = [
-                        os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
-                        os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
-                        os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V2.png'),
-                    ]
+                    # Source photos per bottle type
+                    if bottle_type == 'single_barrel':
+                        source_candidates = [
+                            os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
+                            os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_58_LightBG_V1.png'),
+                        ]
+                    else:  # small_batch
+                        source_candidates = [
+                            os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
+                        ]
+                    
                     source_path = None
                     for c in source_candidates:
                         if os.path.exists(c):
                             source_path = c
                             break
                     if not source_path:
-                        errors.append("No light-background bottle photo found for cutout")
+                        errors.append(f"No light-background photo found for {bottle_type}")
                     else:
-                        print(f"[AI Studio] Creating bottle cutout from {source_path}")
+                        print(f"[AI Studio] Creating {bottle_type} cutout from {source_path}")
                         img = PILImage.open(source_path).convert('RGBA')
                         data_arr = np.array(img)
                         r, g, b, a = data_arr[:,:,0], data_arr[:,:,1], data_arr[:,:,2], data_arr[:,:,3]
                         
-                        # Remove light background (white/near-white pixels)
-                        bg_mask = (r > 215) & (g > 215) & (b > 215)
+                        # Multi-pass background removal for clean edges
+                        brightness = (r.astype(float) + g.astype(float) + b.astype(float)) / 3.0
+                        
+                        # Hard removal of pure background
+                        bg_mask = brightness > 230
                         data_arr[bg_mask, 3] = 0
                         
-                        # Smooth edge transition for anti-aliasing
-                        semi_mask = (r > 195) & (g > 195) & (b > 195) & ~bg_mask
-                        if np.any(semi_mask):
-                            brightness = (r[semi_mask].astype(float) + g[semi_mask].astype(float) + b[semi_mask].astype(float)) / 3.0
-                            alpha_vals = (255 * (1 - np.clip((brightness - 195) / 20.0, 0, 1))).astype(np.uint8)
-                            data_arr[semi_mask, 3] = alpha_vals
+                        # Gradual fade for edge pixels (anti-aliasing)
+                        edge_mask = (brightness > 200) & (brightness <= 230)
+                        if np.any(edge_mask):
+                            alpha_vals = (255 * (1 - np.clip((brightness[edge_mask] - 200) / 30.0, 0, 1))).astype(np.uint8)
+                            data_arr[edge_mask, 3] = alpha_vals
+                        
+                        # Softer transition zone
+                        soft_mask = (brightness > 185) & (brightness <= 200)
+                        if np.any(soft_mask):
+                            alpha_vals = (255 * (1 - np.clip((brightness[soft_mask] - 185) / 15.0, 0, 0.3))).astype(np.uint8)
+                            current_alpha = data_arr[soft_mask, 3]
+                            data_arr[soft_mask, 3] = np.minimum(current_alpha, alpha_vals + 180)
                         
                         cutout = PILImage.fromarray(data_arr)
+                        
+                        # Trim transparent edges to get tight bounding box
+                        bbox = cutout.getbbox()
+                        if bbox:
+                            cutout = cutout.crop(bbox)
+                        
                         cutout.save(cutout_path)
-                        print(f"[AI Studio] Bottle cutout saved: {cutout_path}")
+                        print(f"[AI Studio] Bottle cutout saved: {cutout_path} ({cutout.size})")
                 
                 if os.path.exists(cutout_path):
                     # Step 2: Generate BACKGROUND ONLY with AI (no bottle!)
                     scene_prompt = (
                         f"Professional product photography background scene: {prompt}. "
                         "This is ONLY the background/surface/environment — do NOT include any bottles, "
-                        "drinks, beverages, or products in the image. Leave the center of the frame "
-                        "empty for product placement. Photorealistic, high-end luxury aesthetic, "
-                        "beautiful lighting. The scene should look like a premium spirits advertisement "
-                        "background waiting for the product to be placed on it."
+                        "drinks, beverages, glasses, or products in the image. Leave the center-bottom area "
+                        "of the frame clear as a natural resting surface for an object. "
+                        "Photorealistic, high-end luxury aesthetic, cinematic lighting with depth. "
+                        "Premium spirits advertisement background."
                     )
                     
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1024'
@@ -1049,20 +1073,18 @@ def api_generate_image():
                         bg_img = None
                         
                         if img_data_resp.get('b64_json'):
-                            import io
                             bg_bytes = b64.b64decode(img_data_resp['b64_json'])
                             bg_img = PILImage.open(io.BytesIO(bg_bytes)).convert('RGBA')
                         elif img_data_resp.get('url'):
                             bg_response = req.get(img_data_resp['url'], timeout=30)
-                            import io
                             bg_img = PILImage.open(io.BytesIO(bg_response.content)).convert('RGBA')
                         
                         if bg_img:
                             # Step 3: Composite real bottle onto AI background
                             bottle = PILImage.open(cutout_path).convert('RGBA')
                             
-                            # Scale bottle relative to background
-                            scale_factor = float(bottle_scale) if bottle_scale else 0.55
+                            # Scale bottle relative to background height
+                            scale_factor = float(bottle_scale) if bottle_scale else 0.65
                             scale_factor = max(0.3, min(0.85, scale_factor))
                             target_h = int(bg_img.height * scale_factor)
                             aspect = bottle.width / bottle.height
@@ -1072,30 +1094,66 @@ def api_generate_image():
                             # Position bottle
                             pos = bottle_position or 'center'
                             if pos == 'left':
-                                x = int(bg_img.width * 0.12)
+                                x = int(bg_img.width * 0.15)
                             elif pos == 'right':
-                                x = bg_img.width - target_w - int(bg_img.width * 0.12)
+                                x = bg_img.width - target_w - int(bg_img.width * 0.15)
                             else:  # center
                                 x = (bg_img.width - target_w) // 2
                             
-                            # Vertical: sit near bottom with slight margin
-                            y = bg_img.height - target_h - int(bg_img.height * 0.06)
+                            # Vertical: sit near bottom
+                            y = bg_img.height - target_h - int(bg_img.height * 0.05)
                             
-                            # Add subtle shadow beneath bottle for realism
-                            shadow = PILImage.new('RGBA', bg_img.size, (0, 0, 0, 0))
-                            shadow_bottle = bottle.copy()
-                            # Darken and blur the shadow
-                            shadow_data = np.array(shadow_bottle)
-                            shadow_data[:,:,0] = 0  # Black
-                            shadow_data[:,:,1] = 0
-                            shadow_data[:,:,2] = 0
-                            shadow_data[:,:,3] = (shadow_data[:,:,3] * 0.3).astype(np.uint8)  # 30% opacity
-                            shadow_img = PILImage.fromarray(shadow_data)
-                            # Offset shadow down and slightly right
-                            shadow.paste(shadow_img, (x + 8, y + 12), shadow_img)
+                            # --- Create REFLECTION beneath bottle ---
+                            reflection = bottle.copy()
+                            reflection = reflection.transpose(PILImage.FLIP_TOP_BOTTOM)
+                            # Crop to bottom 30% of reflected image
+                            ref_crop_h = int(reflection.height * 0.3)
+                            reflection = reflection.crop((0, 0, reflection.width, ref_crop_h))
+                            # Fade reflection from top (30% opacity) to bottom (0%)
+                            ref_data = np.array(reflection)
+                            for row_idx in range(ref_data.shape[0]):
+                                fade = 0.25 * (1 - row_idx / ref_data.shape[0])
+                                ref_data[row_idx, :, 3] = (ref_data[row_idx, :, 3] * fade).astype(np.uint8)
+                            reflection = PILImage.fromarray(ref_data)
+                            # Apply slight blur to reflection
+                            reflection = reflection.filter(ImageFilter.GaussianBlur(radius=2))
                             
-                            # Composite: background → shadow → bottle
-                            composite = PILImage.alpha_composite(bg_img, shadow)
+                            # --- Create SHADOW beneath bottle ---
+                            # Elliptical shadow at base of bottle
+                            shadow_layer = PILImage.new('RGBA', bg_img.size, (0, 0, 0, 0))
+                            # Create oval shadow
+                            shadow_w = int(target_w * 1.1)
+                            shadow_h = int(target_w * 0.15)
+                            shadow_ellipse = PILImage.new('RGBA', (shadow_w, shadow_h), (0, 0, 0, 0))
+                            # Draw soft ellipse
+                            se_data = np.array(shadow_ellipse)
+                            cy, cx = shadow_h // 2, shadow_w // 2
+                            for sy in range(shadow_h):
+                                for sx in range(shadow_w):
+                                    dx = (sx - cx) / (shadow_w / 2)
+                                    dy = (sy - cy) / (shadow_h / 2)
+                                    dist = (dx*dx + dy*dy) ** 0.5
+                                    if dist < 1.0:
+                                        alpha = int(90 * (1 - dist))  # Max 90 alpha, fades to edge
+                                        se_data[sy, sx, 3] = alpha
+                            shadow_ellipse = PILImage.fromarray(se_data)
+                            shadow_ellipse = shadow_ellipse.filter(ImageFilter.GaussianBlur(radius=4))
+                            # Position shadow at bottle base
+                            sx = x + (target_w - shadow_w) // 2
+                            sy = y + target_h - shadow_h // 2
+                            shadow_layer.paste(shadow_ellipse, (sx, sy), shadow_ellipse)
+                            
+                            # --- Composite everything ---
+                            # 1. Background
+                            composite = bg_img.copy()
+                            # 2. Shadow
+                            composite = PILImage.alpha_composite(composite, shadow_layer)
+                            # 3. Reflection (beneath bottle position)
+                            ref_x = x
+                            ref_y = y + target_h
+                            if ref_y + reflection.height <= composite.height:
+                                composite.paste(reflection, (ref_x, ref_y), reflection)
+                            # 4. Bottle (on top of everything)
                             composite.paste(bottle, (x, y), bottle)
                             
                             # Save final result
@@ -1103,7 +1161,7 @@ def api_generate_image():
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             composite.convert('RGB').save(filepath, quality=95)
                             image_url = f"/static/uploads/{filename}"
-                            model_used = 'composite (real bottle + AI scene)'
+                            model_used = f'composite ({bottle_type} + AI scene)'
                             revised_prompt = scene_prompt
                             print(f"[AI Studio] Composite image saved: {filepath}")
                     else:
@@ -1119,8 +1177,9 @@ def api_generate_image():
                 errors.append(f"Pillow/numpy not installed: {str(ie)}")
                 print(f"[AI Studio] Import error: {ie}")
             except Exception as e:
+                import traceback
                 errors.append(f"Composite: {str(e)[:200]}")
-                print(f"[AI Studio] Composite exception: {e}")
+                print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
         
         # =====================================================
         # FALLBACK: Text-only generation (no reference)

@@ -94,8 +94,15 @@
             </label>
             <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">AI generates ONLY the background scene, then your REAL bottle photo is composited on top. This guarantees your exact bottle — correct label, proof, shape, everything.</p>
             
-            <div id="compositeControls" style="display: flex; gap: 8px; margin-top: 10px;">
-                <div style="flex: 1;">
+            <div id="compositeControls" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+                <div style="flex: 1; min-width: 120px;">
+                    <label style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; display: block;">Bottle</label>
+                    <select id="bottleType" class="form-control" style="font-size: 0.9rem;">
+                        <option value="small_batch" selected>Small Batch (Black Label)</option>
+                        <option value="single_barrel">Single Barrel (Gold Label)</option>
+                    </select>
+                </div>
+                <div style="flex: 1; min-width: 90px;">
                     <label style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; display: block;">Position</label>
                     <select id="bottlePosition" class="form-control" style="font-size: 0.9rem;">
                         <option value="center" selected>Center</option>
@@ -103,13 +110,13 @@
                         <option value="right">Right</option>
                     </select>
                 </div>
-                <div style="flex: 1;">
+                <div style="flex: 1; min-width: 90px;">
                     <label style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; display: block;">Bottle Size</label>
                     <select id="bottleScale" class="form-control" style="font-size: 0.9rem;">
-                        <option value="0.40">Small</option>
-                        <option value="0.55" selected>Medium</option>
-                        <option value="0.70">Large</option>
-                        <option value="0.85">Extra Large</option>
+                        <option value="0.45">Small</option>
+                        <option value="0.55">Medium</option>
+                        <option value="0.65" selected>Large</option>
+                        <option value="0.78">Extra Large</option>
                     </select>
                 </div>
             </div>
@@ -434,7 +441,8 @@
         var quality = document.getElementById('imageQuality').value;
         var useRef = document.getElementById('useBottleRef').checked;
         var bottlePosition = document.getElementById('bottlePosition') ? document.getElementById('bottlePosition').value : 'center';
-        var bottleScale = document.getElementById('bottleScale') ? document.getElementById('bottleScale').value : '0.55';
+        var bottleScale = document.getElementById('bottleScale') ? document.getElementById('bottleScale').value : '0.65';
+        var bottleType = document.getElementById('bottleType') ? document.getElementById('bottleType').value : 'small_batch';
         
         document.getElementById('imageResult').classList.remove('hidden');
         document.getElementById('imageLoading').classList.remove('hidden');
@@ -458,7 +466,8 @@
                 quality: quality, 
                 use_reference: useRef,
                 bottle_position: bottlePosition,
-                bottle_scale: parseFloat(bottleScale)
+                bottle_scale: parseFloat(bottleScale),
+                bottle_type: bottleType
             })
         }).then(safeJSON).then(function(data) {
             document.getElementById('imageLoading').classList.add('hidden');
