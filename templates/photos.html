@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Photo Gallery — Forbidden Command Center{% endblock %}
+{% block content %}
+<style>
+    .gallery-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px; }
+    .gallery-header h2 { margin:0; font-family:'Cormorant Garamond',serif; color:var(--gold); font-size:1.6rem; }
+    .gallery-stats { color:var(--text-muted); font-size:0.85rem; }
+    .filter-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+    .filter-btn { padding:6px 14px; border-radius:20px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:0.82rem; cursor:pointer; transition:all 0.2s; }
+    .filter-btn.active, .filter-btn:hover { background:var(--gold); color:#000; border-color:var(--gold); }
+    .photo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:12px; }
+    .photo-card { position:relative; border-radius:10px; overflow:hidden; background:var(--card-bg); border:1px solid var(--border); cursor:pointer; transition:transform 0.2s, box-shadow 0.2s; aspect-ratio:1; }
+    .photo-card:hover { transform:translateY(-3px); box-shadow:0 8px 24px rgba(212,175,55,0.15); }
+    .photo-card img { width:100%; height:100%; object-fit:cover; }
+    .photo-card .hero-badge { position:absolute; top:8px; right:8px; background:var(--gold); color:#000; font-size:0.65rem; padding:2px 8px; border-radius:10px; font-weight:700; text-transform:uppercase; }
+    .photo-card .photo-overlay { position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent, rgba(0,0,0,0.85)); padding:8px 10px; opacity:0; transition:opacity 0.2s; }
+    .photo-card:hover .photo-overlay { opacity:1; }
+    .photo-overlay .photo-name { color:#fff; font-size:0.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .photo-overlay .photo-cat { color:var(--gold); font-size:0.65rem; margin-top:2px; }
+    
+    /* Lightbox */
+    .lightbox { display:none; position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.92); backdrop-filter:blur(8px); justify-content:center; align-items:center; flex-direction:column; padding:20px; }
+    .lightbox.active { display:flex; }
+    .lightbox img { max-width:90vw; max-height:70vh; object-fit:contain; border-radius:8px; box-shadow:0 0 40px rgba(0,0,0,0.5); }
+    .lightbox-close { position:absolute; top:16px; right:20px; color:#fff; font-size:2rem; cursor:pointer; z-index:10001; background:none; border:none; }
+    .lightbox-info { margin-top:16px; text-align:center; max-width:600px; }
+    .lightbox-info .lb-name { color:var(--gold); font-size:1.1rem; font-weight:600; }
+    .lightbox-info .lb-cat { color:var(--text-muted); font-size:0.85rem; margin-top:4px; }
+    .lightbox-actions { display:flex; gap:10px; margin-top:14px; justify-content:center; flex-wrap:wrap; }
+    .lightbox-actions button { padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:0.82rem; cursor:pointer; transition:all 0.2s; }
+    .lightbox-actions button:hover { background:var(--gold); color:#000; border-color:var(--gold); }
+    .lightbox-nav { position:absolute; top:50%; transform:translateY(-50%); color:#fff; font-size:2.5rem; cursor:pointer; background:rgba(0,0,0,0.4); border:none; padding:8px 14px; border-radius:8px; }
+    .lightbox-nav.prev { left:16px; }
+    .lightbox-nav.next { right:16px; }
+    
+    /* Use-in section */
+    .use-photos-section { margin-top:24px; padding:16px; background:var(--card-bg); border:1px solid var(--border); border-radius:12px; }
+    .use-photos-section h3 { color:var(--gold); font-size:1rem; margin:0 0 10px 0; font-family:'Cormorant Garamond',serif; }
+    .use-photos-section p { color:var(--text-muted); font-size:0.85rem; margin:4px 0; }
+    
+    @media(max-width:600px) {
+        .photo-grid { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; }
+    }
+</style>
+
+<div class="gallery-header">
+    <div>
+        <h2>📸 Bottle Gallery</h2>
+        <div class="gallery-stats" id="galleryStats">Loading photos...</div>
+    </div>
+</div>
+
+<div class="filter-bar" id="filterBar">
+    <button class="filter-btn active" onclick="filterGallery('all')">All</button>
+</div>
+
+<div class="photo-grid" id="photoGrid"></div>
+
+<div class="use-photos-section">
+    <h3>📌 Using Photos</h3>
+    <p>🖼️ <strong>In Blog Posts:</strong> Click any photo → "Copy URL" → paste into your blog article's HTML as an &lt;img&gt; tag</p>
+    <p>🤖 <strong>AI Image Gen:</strong> The best product photo (light background) is auto-used as the reference for AI-generated images in AI Studio</p>
+    <p>📱 <strong>Social Posts:</strong> Click any photo → "Use in Post" to jump to Compose with the photo attached</p>
+    <p>⭐ Photos marked "Hero" are the cleanest product shots — best for AI reference and blog headers</p>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="if(event.target===this)closeLightbox()">
+    <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+    <button class="lightbox-nav prev" onclick="navLightbox(-1)">&#8249;</button>
+    <button class="lightbox-nav next" onclick="navLightbox(1)">&#8250;</button>
+    <img id="lbImage" src="" alt="">
+    <div class="lightbox-info">
+        <div class="lb-name" id="lbName"></div>
+        <div class="lb-cat" id="lbCat"></div>
+        <div class="lightbox-actions">
+            <button onclick="copyPhotoUrl()">📋 Copy URL</button>
+            <button onclick="copyImgTag()">🖼️ Copy &lt;img&gt; Tag</button>
+            <button onclick="useInPost()">📱 Use in Post</button>
+            <button onclick="openFullSize()">🔗 Open Full Size</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var allPhotos = [];
+var filteredPhotos = [];
+var currentLbIndex = 0;
+var currentFilter = 'all';
+
+async function loadGallery() {
+    try {
+        var data = await apiCall('/api/photos/gallery');
+        if (data.success) {
+            allPhotos = data.photos;
+            document.getElementById('galleryStats').textContent = data.total + ' photos · ' + data.categories.length + ' categories';
+            buildFilters(data.categories);
+            renderPhotos(allPhotos);
+        } else {
+            document.getElementById('photoGrid').innerHTML = '<p style="color:var(--text-muted);grid-column:1/-1;text-align:center;padding:40px;">No photos found. Push photos to static/photos/gallery/ on GitHub.</p>';
+        }
+    } catch(e) {
+        document.getElementById('photoGrid').innerHTML = '<p style="color:#ff6b6b;grid-column:1/-1;text-align:center;padding:40px;">Error loading gallery: ' + e.message + '</p>';
+    }
+}
+
+function buildFilters(categories) {
+    var bar = document.getElementById('filterBar');
+    bar.innerHTML = '<button class="filter-btn active" onclick="filterGallery(\'all\')">All</button>';
+    categories.forEach(function(cat) {
+        bar.innerHTML += '<button class="filter-btn" onclick="filterGallery(\'' + cat.replace(/'/g,"\\'") + '\')">' + cat + '</button>';
+    });
+}
+
+function filterGallery(cat) {
+    currentFilter = cat;
+    document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+    event.target.classList.add('active');
+    if (cat === 'all') {
+        renderPhotos(allPhotos);
+    } else {
+        renderPhotos(allPhotos.filter(function(p) { return p.category === cat; }));
+    }
+}
+
+function renderPhotos(photos) {
+    filteredPhotos = photos;
+    var grid = document.getElementById('photoGrid');
+    if (photos.length === 0) {
+        grid.innerHTML = '<p style="color:var(--text-muted);grid-column:1/-1;text-align:center;padding:40px;">No photos in this category.</p>';
+        return;
+    }
+    grid.innerHTML = photos.map(function(p, i) {
+        return '<div class="photo-card" onclick="openLightbox(' + i + ')">' +
+            '<img src="' + p.url + '" alt="' + p.filename + '" loading="lazy">' +
+            (p.is_hero ? '<span class="hero-badge">⭐ Hero</span>' : '') +
+            '<div class="photo-overlay">' +
+                '<div class="photo-name">' + p.filename + '</div>' +
+                '<div class="photo-cat">' + p.category + '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function openLightbox(index) {
+    currentLbIndex = index;
+    var p = filteredPhotos[index];
+    document.getElementById('lbImage').src = p.url;
+    document.getElementById('lbName').textContent = p.filename;
+    document.getElementById('lbCat').textContent = p.category + (p.is_hero ? ' · ⭐ Hero Shot' : '') + ' · ' + Math.round(p.size/1024) + 'KB';
+    document.getElementById('lightbox').classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+function navLightbox(dir) {
+    currentLbIndex = (currentLbIndex + dir + filteredPhotos.length) % filteredPhotos.length;
+    openLightbox(currentLbIndex);
+}
+
+function copyPhotoUrl() {
+    var p = filteredPhotos[currentLbIndex];
+    var fullUrl = window.location.origin + p.url;
+    navigator.clipboard.writeText(fullUrl).then(function() {
+        showToast('URL copied!', 'success');
+    });
+}
+
+function copyImgTag() {
+    var p = filteredPhotos[currentLbIndex];
+    var fullUrl = window.location.origin + p.url;
+    var tag = '<img src="' + fullUrl + '" alt="Forbidden Bourbon" style="max-width:100%;border-radius:8px;">';
+    navigator.clipboard.writeText(tag).then(function() {
+        showToast('HTML img tag copied!', 'success');
+    });
+}
+
+function useInPost() {
+    var p = filteredPhotos[currentLbIndex];
+    closeLightbox();
+    window.location.href = '/compose?photo=' + encodeURIComponent(p.url);
+}
+
+function openFullSize() {
+    var p = filteredPhotos[currentLbIndex];
+    window.open(p.url, '_blank');
+}
+
+document.addEventListener('keydown', function(e) {
+    if (!document.getElementById('lightbox').classList.contains('active')) return;
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowLeft') navLightbox(-1);
+    if (e.key === 'ArrowRight') navLightbox(1);
+});
+
+loadGallery();
+</script>
+{% endblock %}

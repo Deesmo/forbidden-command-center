@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Calendar{% endblock %}
+{% block content %}
+<style>
+    .cal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+    .cal-header h2 { margin:0; color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; }
+    .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+    .cal-day-header { text-align:center; color:var(--gold); font-size:0.75rem; font-weight:600; padding:8px 4px; }
+    .cal-day { background:var(--card-bg); border:1px solid var(--border); border-radius:8px; min-height:80px; padding:6px; font-size:0.75rem; }
+    .cal-day .day-num { color:var(--text-muted); font-weight:600; margin-bottom:4px; }
+    .cal-day .cal-event { background:rgba(212,175,55,0.15); color:var(--gold); padding:2px 6px; border-radius:4px; font-size:0.68rem; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+    .cal-day.today { border-color:var(--gold); }
+    .upcoming-list { margin-top:20px; }
+    .upcoming-item { background:var(--card-bg); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+    .upcoming-item .up-title { color:var(--text); font-size:0.88rem; }
+    .upcoming-item .up-date { color:var(--gold); font-size:0.78rem; }
+    @media(max-width:600px) { .cal-grid { grid-template-columns:repeat(7,1fr); gap:2px; } .cal-day { min-height:50px; padding:3px; } }
+</style>
+
+<div class="cal-header">
+    <h2>📅 Content Calendar</h2>
+    <a href="/compose" class="btn btn-primary btn-sm">+ New Post</a>
+</div>
+
+<div class="cal-grid">
+    <div class="cal-day-header">Sun</div><div class="cal-day-header">Mon</div><div class="cal-day-header">Tue</div>
+    <div class="cal-day-header">Wed</div><div class="cal-day-header">Thu</div><div class="cal-day-header">Fri</div><div class="cal-day-header">Sat</div>
+</div>
+<div class="cal-grid" id="calGrid"></div>
+
+<div class="upcoming-list">
+    <h3 style="color:var(--gold);font-family:'Cormorant Garamond',serif;font-size:1.2rem;">📌 Scheduled Posts</h3>
+    {% if scheduled %}
+    {% for post in scheduled %}
+    <div class="upcoming-item">
+        <div class="up-title">{{ post.content[:80] }}{% if post.content|length > 80 %}...{% endif %}</div>
+        <div class="up-date">{{ post.scheduled_at[:16] if post.scheduled_at else 'Pending' }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:var(--text-muted);text-align:center;padding:20px;">No scheduled posts. <a href="/compose" style="color:var(--gold);">Create one</a></p>
+    {% endif %}
+    
+    {% if published %}
+    <h3 style="color:var(--gold);font-family:'Cormorant Garamond',serif;font-size:1.2rem;margin-top:20px;">✅ Recently Published</h3>
+    {% for post in published[:10] %}
+    <div class="upcoming-item">
+        <div class="up-title">{{ post.content[:80] }}{% if post.content|length > 80 %}...{% endif %}</div>
+        <div class="up-date">{{ post.published_at[:16] if post.published_at else post.created_at[:16] }}</div>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+<script>
+// Simple calendar grid for current month
+(function() {
+    var now = new Date();
+    var year = now.getFullYear(), month = now.getMonth();
+    var firstDay = new Date(year, month, 1).getDay();
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+    var grid = document.getElementById('calGrid');
+    var html = '';
+    for (var i = 0; i < firstDay; i++) html += '<div class="cal-day" style="opacity:0.3;"></div>';
+    for (var d = 1; d <= daysInMonth; d++) {
+        var isToday = d === now.getDate() ? ' today' : '';
+        html += '<div class="cal-day' + isToday + '"><div class="day-num">' + d + '</div></div>';
+    }
+    grid.innerHTML = html;
+})();
+</script>
+{% endblock %}

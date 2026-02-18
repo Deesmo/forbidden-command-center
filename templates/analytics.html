@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block content %}
+<style>
+    .analytics-header h2 { color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; margin-bottom:16px; }
+    .stat-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; margin-bottom:20px; }
+    .stat-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center; }
+    .stat-card .stat-value { color:var(--gold); font-size:1.8rem; font-weight:700; font-family:'Cormorant Garamond',serif; }
+    .stat-card .stat-label { color:var(--text-muted); font-size:0.78rem; margin-top:4px; text-transform:uppercase; letter-spacing:0.05em; }
+    .section-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+    .section-card h3 { color:var(--gold); font-family:'Cormorant Garamond',serif; margin:0 0 12px 0; font-size:1.1rem; }
+    .ga4-status { padding:12px; border-radius:8px; font-size:0.88rem; margin-bottom:16px; }
+    .ga4-ok { background:rgba(76,175,80,0.15); color:#4caf50; }
+    .ga4-no { background:rgba(255,107,107,0.15); color:#ff6b6b; }
+    .pub-item { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border); font-size:0.85rem; }
+    .pub-item:last-child { border-bottom:none; }
+</style>
+
+<div class="analytics-header">
+    <h2>📊 Analytics</h2>
+</div>
+
+<div class="stat-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total_posts if stats else 0 }}</div>
+        <div class="stat-label">Total Posts</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.published if stats else 0 }}</div>
+        <div class="stat-label">Published</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.drafts if stats else 0 }}</div>
+        <div class="stat-label">Drafts</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.scheduled if stats else 0 }}</div>
+        <div class="stat-label">Scheduled</div>
+    </div>
+</div>
+
+<div class="section-card">
+    <h3>🌐 Google Analytics</h3>
+    {% if ga4_configured %}
+    <div class="ga4-status ga4-ok">✅ GA4 Connected</div>
+    <div id="ga4Data">Loading analytics data...</div>
+    {% else %}
+    <div class="ga4-status ga4-no">GA4 not configured. Set GA4_PROPERTY_ID and GA4_CREDENTIALS_JSON in Render env vars.</div>
+    {% endif %}
+</div>
+
+{% if published %}
+<div class="section-card">
+    <h3>📝 Recent Published Posts</h3>
+    {% for p in published[:15] %}
+    <div class="pub-item">
+        <span style="color:var(--text);">{{ p.content[:60] }}{% if p.content|length > 60 %}...{% endif %}</span>
+        <span style="color:var(--text-muted);">{{ p.published_at[:10] if p.published_at else '' }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<script>
+{% if ga4_configured %}
+async function loadGA4() {
+    try {
+        var data = await apiCall('/api/ga4/data');
+        if (data.success) {
+            document.getElementById('ga4Data').innerHTML = '<p style="color:var(--text);">Sessions: ' + (data.sessions || 'N/A') + ' · Users: ' + (data.users || 'N/A') + ' · Page Views: ' + (data.pageviews || 'N/A') + '</p>';
+        }
+    } catch(e) { document.getElementById('ga4Data').innerHTML = '<p style="color:var(--text-muted);">Could not load GA4 data</p>'; }
+}
+loadGA4();
+{% endif %}
+</script>
+{% endblock %}

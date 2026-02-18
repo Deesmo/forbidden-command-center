@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Templates{% endblock %}
+{% block content %}
+<style>
+    .section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+    .section-header h2 { margin:0; color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.4rem; }
+    .tpl-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:10px; }
+    .tpl-card .tpl-name { color:var(--gold); font-weight:600; font-size:0.95rem; }
+    .tpl-card .tpl-content { color:var(--text-muted); font-size:0.85rem; margin-top:6px; white-space:pre-wrap; }
+    .tpl-card .tpl-actions { display:flex; gap:8px; margin-top:10px; }
+    .tpl-card .tpl-actions button { padding:4px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text-muted); font-size:0.78rem; cursor:pointer; }
+    .tpl-card .tpl-actions button:hover { border-color:var(--gold); color:var(--gold); }
+    .add-form { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:20px; }
+    .add-form input, .add-form textarea { width:100%; padding:8px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.9rem; margin-bottom:8px; font-family:inherit; }
+    .add-form textarea { min-height:80px; resize:vertical; }
+    .tag-card { display:inline-block; background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin:4px; }
+    .tag-name { color:var(--gold); font-weight:600; font-size:0.88rem; }
+    .tag-tags { color:var(--text-muted); font-size:0.78rem; margin-top:4px; }
+</style>
+
+<div class="section-header">
+    <h2>📋 Post Templates</h2>
+</div>
+
+<div class="add-form" id="addTemplateForm" style="display:none;">
+    <input id="newTplName" placeholder="Template name (e.g. Weekend Sipping)">
+    <textarea id="newTplContent" placeholder="Template content..."></textarea>
+    <button class="btn btn-primary btn-sm" onclick="saveTemplate()">Save Template</button>
+    <button class="btn btn-sm" onclick="document.getElementById('addTemplateForm').style.display='none'">Cancel</button>
+</div>
+<button class="btn btn-sm" onclick="document.getElementById('addTemplateForm').style.display='block'" style="margin-bottom:14px;">+ New Template</button>
+
+{% for t in templates %}
+<div class="tpl-card">
+    <div class="tpl-name">{{ t.name }}</div>
+    <div class="tpl-content">{{ t.content[:200] }}{% if t.content|length > 200 %}...{% endif %}</div>
+    <div class="tpl-actions">
+        <button onclick="window.location.href='/compose?template={{ t.id }}'">✏️ Use</button>
+        <button onclick="deleteTemplate({{ t.id }})" style="color:#ff6b6b;">🗑️</button>
+    </div>
+</div>
+{% else %}
+<p style="color:var(--text-muted);text-align:center;padding:30px;">No templates yet. Create one above.</p>
+{% endfor %}
+
+<div class="section-header" style="margin-top:30px;">
+    <h2>#️⃣ Hashtag Groups</h2>
+</div>
+
+<div class="add-form" id="addHashtagForm" style="display:none;">
+    <input id="newHgName" placeholder="Group name (e.g. Bourbon Core)">
+    <textarea id="newHgTags" placeholder="#forbiddenbourbon #bourbon #whiskey"></textarea>
+    <button class="btn btn-primary btn-sm" onclick="saveHashtags()">Save Group</button>
+    <button class="btn btn-sm" onclick="document.getElementById('addHashtagForm').style.display='none'">Cancel</button>
+</div>
+<button class="btn btn-sm" onclick="document.getElementById('addHashtagForm').style.display='block'" style="margin-bottom:14px;">+ New Group</button>
+
+{% for g in hashtag_groups %}
+<div class="tag-card">
+    <div class="tag-name">{{ g.name }}</div>
+    <div class="tag-tags">{{ g.hashtags[:100] }}</div>
+    <button onclick="deleteHashtagGroup({{ g.id }})" style="color:#ff6b6b;background:none;border:none;font-size:0.75rem;cursor:pointer;margin-top:4px;">🗑️ Delete</button>
+</div>
+{% else %}
+<p style="color:var(--text-muted);text-align:center;padding:30px;">No hashtag groups yet.</p>
+{% endfor %}
+
+<script>
+async function saveTemplate() {
+    var name = document.getElementById('newTplName').value.trim();
+    var content = document.getElementById('newTplContent').value.trim();
+    if (!name || !content) { showToast('Fill in name and content', 'error'); return; }
+    try {
+        await apiCall('/api/templates', 'POST', { name: name, content: content });
+        showToast('Template saved!', 'success');
+        setTimeout(function() { window.location.reload(); }, 800);
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+async function deleteTemplate(id) {
+    if (!confirm('Delete this template?')) return;
+    await apiCall('/api/templates/' + id, 'DELETE');
+    showToast('Deleted', 'success');
+    setTimeout(function() { window.location.reload(); }, 800);
+}
+async function saveHashtags() {
+    var name = document.getElementById('newHgName').value.trim();
+    var tags = document.getElementById('newHgTags').value.trim();
+    if (!name || !tags) { showToast('Fill in name and hashtags', 'error'); return; }
+    try {
+        await apiCall('/api/hashtags', 'POST', { name: name, hashtags: tags });
+        showToast('Hashtag group saved!', 'success');
+        setTimeout(function() { window.location.reload(); }, 800);
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+async function deleteHashtagGroup(id) {
+    if (!confirm('Delete this group?')) return;
+    await apiCall('/api/hashtags/' + id, 'DELETE');
+    showToast('Deleted', 'success');
+    setTimeout(function() { window.location.reload(); }, 800);
+}
+</script>
+{% endblock %}

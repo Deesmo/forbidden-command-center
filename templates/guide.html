@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Guide{% endblock %}
+{% block content %}
+<style>
+    .guide-header h2 { color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; margin-bottom:20px; }
+    .guide-section { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:14px; }
+    .guide-section h3 { color:var(--gold); font-size:1rem; margin:0 0 8px 0; cursor:pointer; }
+    .guide-section p { color:var(--text-muted); font-size:0.88rem; line-height:1.6; margin:4px 0; }
+    .guide-section code { background:var(--bg); padding:2px 6px; border-radius:4px; font-size:0.82rem; color:var(--gold); }
+    .shortcut { display:inline-block; background:var(--bg); border:1px solid var(--border); padding:4px 10px; border-radius:6px; font-size:0.78rem; color:var(--text-muted); margin:3px; }
+</style>
+
+<div class="guide-header">
+    <h2>📖 Command Center Guide</h2>
+</div>
+
+<div class="guide-section">
+    <h3>📸 Photo Gallery</h3>
+    <p>Browse all 31+ bottle product photos at <code>/photos</code>. Photos are organized by category — product shots, lifestyle, single barrel, small batch. Click any photo to view full-size, copy its URL, copy an HTML img tag, or use it in a new post.</p>
+    <p>⭐ Photos marked "Hero" have clean light backgrounds — best for AI image reference and blog headers.</p>
+</div>
+
+<div class="guide-section">
+    <h3>✏️ Compose</h3>
+    <p>Create social media posts with AI assistance. Choose a tone (Professional, Casual, Playful, Educational, Luxury), select target platforms, and attach photos from the gallery. AI Generate creates platform-optimized content using Claude or GPT.</p>
+</div>
+
+<div class="guide-section">
+    <h3>📝 Blog Hub</h3>
+    <p>Generate SEO-optimized blog articles about bourbon topics. 32 pre-loaded topics across categories. Articles auto-include a featured bottle photo. Publish to Medium, WordPress, Blogger, or Reddit with one tap.</p>
+    <p>Strategy: 2-3 articles per week across all platforms for maximum SEO impact and backlinks to drinkforbidden.com.</p>
+</div>
+
+<div class="guide-section">
+    <h3>🎨 AI Studio</h3>
+    <p>Generate AI images using GPT-Image-1 (with your real bottle as reference) or DALL-E 3. Style presets: Product, Lifestyle, Art Deco, Cocktail, Social Ad, Editorial. Generate AI videos with Runway ML.</p>
+    <p>When "Use Bottle Reference" is checked, the AI uses your actual Forbidden Bourbon bottle photo (Black_Front_LightBG_V1.png) to ensure brand consistency.</p>
+</div>
+
+<div class="guide-section">
+    <h3>🔍 Brand Intelligence</h3>
+    <p>Scan the web for mentions of Forbidden Bourbon — reviews, features, press, awards, podcasts, videos, events, and social mentions. Star important mentions and fetch full content.</p>
+    <p>Note: Brand Intel only tracks mentions OF Forbidden Bourbon — never retail/store listings.</p>
+</div>
+
+<div class="guide-section">
+    <h3>📬 Outreach Hub</h3>
+    <p>CRM for bourbon influencer outreach. Scan finds 35+ bourbon YouTubers, bloggers, Instagram creators, podcast hosts. Track status from "new" through "posted about us". Copy pre-built email templates for influencers, bars, and press.</p>
+</div>
+
+<div class="guide-section">
+    <h3>📡 Platforms</h3>
+    <p>Connect your social accounts and API keys. Set these in Render environment variables:</p>
+    <div>
+        <span class="shortcut">ANTHROPIC_API_KEY</span>
+        <span class="shortcut">OPENAI_API_KEY</span>
+        <span class="shortcut">RUNWAY_API_KEY</span>
+        <span class="shortcut">MEDIUM_TOKEN</span>
+        <span class="shortcut">WORDPRESS_SITE</span>
+        <span class="shortcut">WORDPRESS_TOKEN</span>
+        <span class="shortcut">BLOGGER_BLOG_ID</span>
+    </div>
+</div>
+
+<div class="guide-section">
+    <h3>📊 Mash Analytics</h3>
+    <p>Sales data from your Mash Networks e-commerce portal. Upload screenshots of Demographics, Geography, Customer, Products, Marketing, and Baskets tabs to populate the dashboard.</p>
+</div>
+{% endblock %}

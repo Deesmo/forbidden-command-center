@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Platforms{% endblock %}
+{% block content %}
+<style>
+    .platforms-header h2 { color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; margin-bottom:16px; }
+    .plat-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+    .plat-info { display:flex; align-items:center; gap:12px; }
+    .plat-icon { font-size:1.8rem; }
+    .plat-name { font-weight:600; color:var(--text); font-size:1rem; }
+    .plat-status { font-size:0.8rem; padding:4px 10px; border-radius:12px; }
+    .plat-connected { background:rgba(76,175,80,0.2); color:#4caf50; }
+    .plat-disconnected { background:rgba(255,255,255,0.1); color:var(--text-muted); }
+    .plat-actions button { padding:6px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.82rem; cursor:pointer; }
+    .plat-actions button:hover { border-color:var(--gold); color:var(--gold); }
+    .api-section { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; margin-top:20px; }
+    .api-section h3 { color:var(--gold); font-family:'Cormorant Garamond',serif; margin:0 0 12px 0; }
+    .api-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    .api-row label { color:var(--text-muted); font-size:0.85rem; min-width:120px; }
+    .api-row .status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .api-row .dot-green { background:#4caf50; }
+    .api-row .dot-red { background:#ff6b6b; }
+</style>
+
+<div class="platforms-header">
+    <h2>📡 Connected Platforms</h2>
+</div>
+
+{% for p in platforms %}
+<div class="plat-card">
+    <div class="plat-info">
+        <div class="plat-icon">{{ p.icon }}</div>
+        <div>
+            <div class="plat-name">{{ p.display_name }}</div>
+            <span class="plat-status {{ 'plat-connected' if p.connected else 'plat-disconnected' }}">
+                {{ '✓ Connected' if p.connected else '○ Not Connected' }}
+            </span>
+        </div>
+    </div>
+    <div class="plat-actions">
+        {% if p.connected %}
+        <button onclick="testPlatform('{{ p.name }}')">🔄 Test</button>
+        <button onclick="disconnectPlatform('{{ p.name }}')" style="color:#ff6b6b;">Disconnect</button>
+        {% else %}
+        <button onclick="showToast('Set API credentials in Render env vars for {{ p.display_name }}', 'info')">Setup Guide</button>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+<div class="api-section">
+    <h3>🔑 AI Service Keys</h3>
+    <div class="api-row">
+        <label>OpenAI:</label>
+        <span class="status-dot {{ 'dot-green' if config.OPENAI_API_KEY else 'dot-red' }}"></span>
+        <span style="color:var(--text-muted);font-size:0.82rem;">{{ 'Configured' if config.OPENAI_API_KEY else 'Not set — add OPENAI_API_KEY in Render' }}</span>
+    </div>
+    <div class="api-row">
+        <label>Anthropic:</label>
+        <span class="status-dot {{ 'dot-green' if config.ANTHROPIC_API_KEY else 'dot-red' }}"></span>
+        <span style="color:var(--text-muted);font-size:0.82rem;">{{ 'Configured' if config.ANTHROPIC_API_KEY else 'Not set — add ANTHROPIC_API_KEY in Render' }}</span>
+    </div>
+    <div class="api-row">
+        <label>Runway ML:</label>
+        <span class="status-dot {{ 'dot-green' if config.RUNWAY_API_KEY else 'dot-red' }}"></span>
+        <span style="color:var(--text-muted);font-size:0.82rem;">{{ 'Configured' if config.RUNWAY_API_KEY else 'Not set — add RUNWAY_API_KEY in Render' }}</span>
+    </div>
+</div>
+
+<script>
+async function testPlatform(name) {
+    showToast('Testing ' + name + '...', 'info');
+    try {
+        var data = await apiCall('/api/platforms/' + name + '/test', 'POST');
+        showToast(data.success ? name + ' working!' : (data.error || 'Test failed'), data.success ? 'success' : 'error');
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+async function disconnectPlatform(name) {
+    if (!confirm('Disconnect ' + name + '?')) return;
+    try {
+        await apiCall('/api/platforms/' + name + '/disconnect', 'POST');
+        showToast('Disconnected', 'success');
+        setTimeout(function() { window.location.reload(); }, 800);
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+</script>
+{% endblock %}

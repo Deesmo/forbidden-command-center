@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Post Queue{% endblock %}
+{% block content %}
+<style>
+    .queue-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+    .queue-header h2 { margin:0; color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; }
+    .filter-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+    .filter-tab { padding:6px 14px; border-radius:20px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:0.8rem; cursor:pointer; text-decoration:none; }
+    .filter-tab.active { background:var(--gold); color:#000; border-color:var(--gold); }
+    .post-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:10px; }
+    .post-card .post-content { color:var(--text); font-size:0.9rem; white-space:pre-wrap; word-break:break-word; }
+    .post-meta { display:flex; justify-content:space-between; align-items:center; margin-top:10px; flex-wrap:wrap; gap:6px; }
+    .post-meta .status { padding:3px 10px; border-radius:12px; font-size:0.72rem; font-weight:600; text-transform:uppercase; }
+    .status-draft { background:rgba(255,255,255,0.1); color:var(--text-muted); }
+    .status-published { background:rgba(76,175,80,0.2); color:#4caf50; }
+    .status-scheduled { background:rgba(33,150,243,0.2); color:#2196f3; }
+    .post-actions { display:flex; gap:6px; }
+    .post-actions button { padding:4px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text-muted); font-size:0.75rem; cursor:pointer; }
+    .post-actions button:hover { border-color:var(--gold); color:var(--gold); }
+    .empty-state { text-align:center; padding:60px 20px; color:var(--text-muted); }
+</style>
+
+<div class="queue-header">
+    <h2>📋 Post Queue</h2>
+    <div class="filter-tabs">
+        <a href="/queue?status=all" class="filter-tab {{ 'active' if status_filter == 'all' }}">All</a>
+        <a href="/queue?status=draft" class="filter-tab {{ 'active' if status_filter == 'draft' }}">Drafts</a>
+        <a href="/queue?status=scheduled" class="filter-tab {{ 'active' if status_filter == 'scheduled' }}">Scheduled</a>
+        <a href="/queue?status=published" class="filter-tab {{ 'active' if status_filter == 'published' }}">Published</a>
+    </div>
+</div>
+
+{% if posts %}
+{% for post in posts %}
+<div class="post-card">
+    <div class="post-content">{{ post.content[:300] }}{% if post.content|length > 300 %}...{% endif %}</div>
+    <div class="post-meta">
+        <div>
+            <span class="status status-{{ post.status }}">{{ post.status }}</span>
+            <span style="color:var(--text-muted);font-size:0.75rem;margin-left:8px;">{{ post.created_at[:16] if post.created_at else '' }}</span>
+        </div>
+        <div class="post-actions">
+            <button onclick="window.location.href='/compose?edit={{ post.id }}'">✏️ Edit</button>
+            <button onclick="duplicatePost({{ post.id }})">📋 Copy</button>
+            <button onclick="deletePost({{ post.id }})" style="color:#ff6b6b;">🗑️</button>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="empty-state">
+    <div style="font-size:2rem;margin-bottom:10px;">📭</div>
+    <div>No posts yet. <a href="/compose" style="color:var(--gold);">Create your first post</a></div>
+</div>
+{% endif %}
+
+<script>
+async function deletePost(id) {
+    if (!confirm('Delete this post?')) return;
+    try {
+        await apiCall('/api/posts/' + id, 'DELETE');
+        showToast('Post deleted', 'success');
+        setTimeout(function() { window.location.reload(); }, 800);
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+async function duplicatePost(id) {
+    try {
+        await apiCall('/api/posts/' + id + '/duplicate', 'POST');
+        showToast('Post duplicated', 'success');
+        setTimeout(function() { window.location.reload(); }, 800);
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+</script>
+{% endblock %}

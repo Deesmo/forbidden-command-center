@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Compose{% endblock %}
+{% block content %}
+<style>
+    .compose-area { display:flex; flex-direction:column; gap:16px; }
+    .compose-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; }
+    .compose-card h3 { color:var(--gold); font-family:'Cormorant Garamond',serif; margin:0 0 12px 0; font-size:1.1rem; }
+    textarea.compose-input { width:100%; min-height:140px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:12px; font-size:0.95rem; resize:vertical; font-family:inherit; }
+    .char-count { text-align:right; color:var(--text-muted); font-size:0.78rem; margin-top:4px; }
+    .platform-checks { display:flex; flex-wrap:wrap; gap:10px; margin:10px 0; }
+    .platform-check { display:flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:0.85rem; }
+    .platform-check input { accent-color:var(--gold); }
+    .platform-check.connected { border-color:var(--gold); opacity:1; }
+    .platform-check:not(.connected) { opacity:0.5; }
+    .tone-row, .type-row { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+    .tone-btn, .type-btn { padding:6px 14px; border-radius:20px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:0.8rem; cursor:pointer; transition:all 0.2s; }
+    .tone-btn.active, .type-btn.active { background:var(--gold); color:#000; border-color:var(--gold); }
+    .btn-row { display:flex; gap:10px; flex-wrap:wrap; }
+    .photo-picker { display:flex; gap:8px; overflow-x:auto; padding:8px 0; }
+    .photo-picker img { width:64px; height:64px; object-fit:cover; border-radius:8px; border:2px solid transparent; cursor:pointer; }
+    .photo-picker img.selected { border-color:var(--gold); }
+    .photo-picker img:hover { border-color:var(--gold-dark); }
+    .media-preview { margin-top:10px; }
+    .media-preview img { max-width:200px; border-radius:8px; }
+    .ai-section { border-top:1px solid var(--border); padding-top:12px; margin-top:12px; }
+    .template-chips { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+    .template-chip { padding:4px 10px; border-radius:12px; border:1px solid var(--border); background:var(--bg); color:var(--text-muted); font-size:0.75rem; cursor:pointer; }
+    .template-chip:hover { border-color:var(--gold); color:var(--gold); }
+    .hashtag-group { padding:4px 10px; border-radius:12px; border:1px solid var(--border); background:var(--bg); color:var(--text-muted); font-size:0.75rem; cursor:pointer; display:inline-block; margin:3px; }
+    .hashtag-group:hover { border-color:var(--gold); color:var(--gold); }
+</style>
+
+<div class="compose-area">
+    <div class="compose-card">
+        <h3>✏️ Compose Post</h3>
+        <textarea class="compose-input" id="postContent" placeholder="What's on your mind about Forbidden Bourbon?" oninput="updateCharCount()">{{ post.content if post else (template.content if template else '') }}</textarea>
+        <div class="char-count"><span id="charCount">0</span> / 280</div>
+
+        <!-- Photo Picker -->
+        <div style="margin-top:10px;">
+            <label style="color:var(--text-muted);font-size:0.82rem;">📷 Attach Photo:</label>
+            <div class="photo-picker" id="photoPicker">Loading photos...</div>
+            <div class="media-preview" id="mediaPreview"></div>
+        </div>
+
+        <!-- Upload -->
+        <div style="margin-top:8px;">
+            <input type="file" id="mediaUpload" accept="image/*,video/mp4" style="font-size:0.82rem;color:var(--text-muted);">
+        </div>
+    </div>
+
+    <div class="compose-card">
+        <h3>📡 Platforms</h3>
+        <div class="platform-checks" id="platformChecks">
+            {% for p in platforms %}
+            {% if p.name not in ('openai','runway') %}
+            <label class="platform-check {{ 'connected' if p.connected }}">
+                <input type="checkbox" name="platform" value="{{ p.name }}" {{ 'checked' if p.connected }}>
+                {{ p.icon }} {{ p.display_name }}
+            </label>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="compose-card">
+        <h3>🎨 Tone & Style</h3>
+        <div class="tone-row">
+            <button class="tone-btn active" onclick="setTone('professional',this)">Professional</button>
+            <button class="tone-btn" onclick="setTone('casual',this)">Casual</button>
+            <button class="tone-btn" onclick="setTone('playful',this)">Playful</button>
+            <button class="tone-btn" onclick="setTone('educational',this)">Educational</button>
+            <button class="tone-btn" onclick="setTone('luxury',this)">Luxury</button>
+        </div>
+
+        <div class="ai-section">
+            <label style="color:var(--text-muted);font-size:0.82rem;">🤖 AI Generate:</label>
+            <input type="text" id="aiTopic" placeholder="Topic (e.g. bourbon cocktails, summer sipping)" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);margin:6px 0;font-size:0.9rem;">
+            <div class="type-row">
+                <button class="type-btn active" onclick="setType('social_post',this)">Post</button>
+                <button class="type-btn" onclick="setType('thread',this)">Thread</button>
+                <button class="type-btn" onclick="setType('caption',this)">Caption</button>
+                <button class="type-btn" onclick="setType('engagement',this)">Engagement</button>
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="aiGenerate()">✦ AI Generate</button>
+        </div>
+    </div>
+
+    {% if hashtag_groups %}
+    <div class="compose-card">
+        <h3>#️⃣ Hashtag Groups</h3>
+        {% for g in hashtag_groups %}
+        <span class="hashtag-group" onclick="appendHashtags('{{ g.hashtags }}')">{{ g.name }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if templates %}
+    <div class="compose-card">
+        <h3>📋 Templates</h3>
+        <div class="template-chips">
+            {% for t in templates %}
+            <span class="template-chip" onclick="useTemplate('{{ t.content|e }}')">{{ t.name }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="btn-row">
+        <button class="btn btn-primary" style="flex:1;" onclick="submitPost('draft')">💾 Save Draft</button>
+        <button class="btn btn-primary" style="flex:1;background:var(--gold);" onclick="submitPost('published')">🚀 Post Now</button>
+    </div>
+</div>
+
+<script>
+var selectedTone = 'professional';
+var selectedType = 'social_post';
+var selectedPhoto = null;
+
+function updateCharCount() {
+    var len = document.getElementById('postContent').value.length;
+    document.getElementById('charCount').textContent = len;
+}
+
+function setTone(t, btn) { selectedTone = t; document.querySelectorAll('.tone-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
+function setType(t, btn) { selectedType = t; document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
+
+function appendHashtags(tags) {
+    var ta = document.getElementById('postContent');
+    ta.value = ta.value.trimEnd() + '\n\n' + tags;
+    updateCharCount();
+}
+
+function useTemplate(content) {
+    document.getElementById('postContent').value = content;
+    updateCharCount();
+}
+
+async function loadPhotoPicker() {
+    try {
+        var data = await apiCall('/api/photos/gallery');
+        if (data.success && data.photos.length > 0) {
+            var picker = document.getElementById('photoPicker');
+            // Show hero shots first, then others
+            var sorted = data.photos.sort(function(a,b) { return (b.is_hero?1:0) - (a.is_hero?1:0); });
+            picker.innerHTML = sorted.slice(0, 20).map(function(p) {
+                return '<img src="' + p.url + '" alt="' + p.filename + '" onclick="selectPhoto(this,\'' + p.url + '\')" title="' + p.filename + '">';
+            }).join('');
+        } else {
+            document.getElementById('photoPicker').innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">No gallery photos found</span>';
+        }
+    } catch(e) {
+        document.getElementById('photoPicker').innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">Could not load photos</span>';
+    }
+}
+
+function selectPhoto(img, url) {
+    document.querySelectorAll('.photo-picker img').forEach(i => i.classList.remove('selected'));
+    if (selectedPhoto === url) { selectedPhoto = null; document.getElementById('mediaPreview').innerHTML = ''; return; }
+    img.classList.add('selected');
+    selectedPhoto = url;
+    document.getElementById('mediaPreview').innerHTML = '<img src="' + url + '" alt="Selected">';
+}
+
+async function aiGenerate() {
+    var topic = document.getElementById('aiTopic').value.trim();
+    if (!topic) { showToast('Enter a topic', 'error'); return; }
+    showToast('Generating...', 'info');
+    try {
+        var data = await apiCall('/api/generate', 'POST', {
+            type: selectedType, topic: topic, tone: selectedTone,
+            platform: document.querySelector('.platform-check input:checked')?.value || 'general'
+        });
+        if (data.success) {
+            document.getElementById('postContent').value = data.content;
+            updateCharCount();
+            showToast('Content generated!', 'success');
+        } else { showToast(data.error || 'Generation failed', 'error'); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function submitPost(status) {
+    var content = document.getElementById('postContent').value.trim();
+    if (!content) { showToast('Write something first', 'error'); return; }
+    
+    var formData = new FormData();
+    formData.append('content', content);
+    formData.append('status', status);
+    
+    var platforms = [];
+    document.querySelectorAll('.platform-check input:checked').forEach(function(cb) { platforms.push(cb.value); });
+    formData.append('platforms', JSON.stringify(platforms));
+    
+    if (selectedPhoto) formData.append('media_url', selectedPhoto);
+    
+    var fileInput = document.getElementById('mediaUpload');
+    if (fileInput.files[0]) formData.append('media', fileInput.files[0]);
+    
+    try {
+        var resp = await fetch('/api/posts', { method: 'POST', body: formData });
+        var data = await resp.json();
+        if (data.success) {
+            showToast(status === 'published' ? 'Posted!' : 'Draft saved!', 'success');
+            if (status === 'published' && data.results) {
+                var ok = data.results.filter(r => r.success).length;
+                var fail = data.results.filter(r => !r.success).length;
+                if (ok > 0) showToast(ok + ' platform(s) published', 'success');
+                if (fail > 0) showToast(fail + ' platform(s) failed', 'error');
+            }
+            setTimeout(function() { window.location.href = '/queue'; }, 1500);
+        } else { showToast(data.error || 'Failed', 'error'); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Check for photo param from gallery
+var urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('photo')) {
+    selectedPhoto = urlParams.get('photo');
+    document.getElementById('mediaPreview').innerHTML = '<img src="' + selectedPhoto + '" alt="Selected">';
+}
+
+updateCharCount();
+loadPhotoPicker();
+</script>
+{% endblock %}

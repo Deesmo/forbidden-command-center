@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Mash Analytics{% endblock %}
+{% block content %}
+<style>
+    .mash-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:20px; }
+    .mash-header h2 { margin:0; color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; }
+    .stat-row { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px; margin-bottom:20px; }
+    .mash-stat { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center; }
+    .mash-stat .val { color:var(--gold); font-size:2rem; font-weight:700; font-family:'Cormorant Garamond',serif; }
+    .mash-stat .lbl { color:var(--text-muted); font-size:0.78rem; text-transform:uppercase; letter-spacing:0.05em; margin-top:4px; }
+    .mash-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:14px; }
+    .mash-card h3 { color:var(--gold); font-family:'Cormorant Garamond',serif; margin:0 0 10px 0; font-size:1.1rem; }
+    .mash-card p { color:var(--text-muted); font-size:0.88rem; }
+    .milestone { background:linear-gradient(135deg, rgba(212,175,55,0.15), rgba(212,175,55,0.05)); border:1px solid var(--gold); border-radius:12px; padding:20px; text-align:center; margin-bottom:20px; }
+    .milestone .big { color:var(--gold); font-size:2.4rem; font-weight:700; font-family:'Cormorant Garamond',serif; }
+    .milestone .sub { color:var(--text-muted); font-size:0.9rem; margin-top:4px; }
+</style>
+
+<div class="mash-header">
+    <h2>📊 Mash Analytics</h2>
+</div>
+
+<div class="milestone">
+    <div class="big">$146,603</div>
+    <div class="sub">Gross Sales · 755 Orders · 1,000+ Bottles Sold</div>
+</div>
+
+<div class="stat-row">
+    <div class="mash-stat"><div class="val">$146.6K</div><div class="lbl">Gross Sales</div></div>
+    <div class="mash-stat"><div class="val">755</div><div class="lbl">Total Orders</div></div>
+    <div class="mash-stat"><div class="val">1,000+</div><div class="lbl">Bottles Sold</div></div>
+    <div class="mash-stat"><div class="val">$194</div><div class="lbl">Avg Order</div></div>
+</div>
+
+<div class="mash-card">
+    <h3>📈 Sales Overview</h3>
+    <p>Data sourced from 41 distiller reports and Mash Networks e-commerce portal. To update these numbers, screenshot the latest tabs from your Mash Networks dashboard (Demographics, Geography, Customer, Products, Marketing, Baskets) and upload them here or in a new chat for integration.</p>
+</div>
+
+<div class="mash-card">
+    <h3>📋 Data Tabs</h3>
+    <p>🏪 <strong>Sales Overview</strong> — Revenue, orders, bottles by month</p>
+    <p>👥 <strong>Customer Demographics</strong> — Age, gender, new vs returning</p>
+    <p>🗺️ <strong>Geography</strong> — Sales by state and city</p>
+    <p>📦 <strong>Products</strong> — Small Batch vs Single Barrel performance</p>
+    <p>📣 <strong>Marketing</strong> — Traffic sources, referrals, campaign ROI</p>
+    <p>🛒 <strong>Baskets</strong> — Cart size, add-ons, bundles</p>
+</div>
+
+<div class="mash-card">
+    <h3>💡 Next Steps</h3>
+    <p>Screenshot each tab from your <a href="https://mashnetworks.com" target="_blank" style="color:var(--gold);">Mash Networks portal</a> and upload to update the dashboard with live data visualizations.</p>
+</div>
+{% endblock %}

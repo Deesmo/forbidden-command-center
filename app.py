@@ -1,4 +1,4 @@
-# Forbidden Bourbon Command Center v12.1 — Blog Hub + Auto-Scheduler + 6 Platforms
+# Forbidden Bourbon Command Center v15b — Gallery + Photos + AI Bottle Ref Fix
 import os
 import json
 import threading
@@ -359,6 +359,65 @@ def analytics_page():
 @app.route('/photos')
 def photos_page():
     return render_template('photos.html', page='photos')
+
+@app.route('/api/photos/gallery')
+def api_photos_gallery():
+    """Return all photos from the gallery folder with metadata"""
+    gallery_dir = os.path.join(app.static_folder, 'photos', 'gallery')
+    photos_dir = os.path.join(app.static_folder, 'photos')
+    photos = []
+    
+    # Category mapping based on filename patterns
+    def categorize(fname):
+        fl = fname.lower()
+        if 'lightbg' in fl:
+            return 'Product (Light BG)'
+        elif 'singlebarrel' in fl:
+            if 'dark' in fl:
+                return 'Single Barrel (Dark)'
+            return 'Single Barrel'
+        elif 'smallbatch' in fl:
+            if 'dark' in fl:
+                return 'Small Batch (Dark)'
+            return 'Small Batch'
+        elif 'golden_front' in fl:
+            return 'Product (Light BG)'
+        elif 'black_front' in fl:
+            return 'Product (Light BG)'
+        elif '-edit' in fl or 'edit.' in fl:
+            return 'Lifestyle / Detail'
+        else:
+            return 'Photo Shoot'
+    
+    # Scan gallery folder
+    if os.path.exists(gallery_dir):
+        for fname in sorted(os.listdir(gallery_dir)):
+            if fname.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                fpath = os.path.join(gallery_dir, fname)
+                photos.append({
+                    'filename': fname,
+                    'url': f'/static/photos/gallery/{fname}',
+                    'category': categorize(fname),
+                    'size': os.path.getsize(fpath),
+                    'is_png': fname.lower().endswith('.png'),
+                    'is_hero': 'lightbg' in fname.lower() or 'black_front' in fname.lower()
+                })
+    
+    # Also include root-level photos
+    for fname in sorted(os.listdir(photos_dir)):
+        fpath = os.path.join(photos_dir, fname)
+        if os.path.isfile(fpath) and fname.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            photos.append({
+                'filename': fname,
+                'url': f'/static/photos/{fname}',
+                'category': 'Brand Assets',
+                'size': os.path.getsize(fpath),
+                'is_png': fname.lower().endswith('.png'),
+                'is_hero': False
+            })
+    
+    categories = sorted(set(p['category'] for p in photos))
+    return jsonify({'success': True, 'photos': photos, 'categories': categories, 'total': len(photos)})
 
 @app.route('/guide')
 def guide_page():
@@ -912,18 +971,30 @@ def api_generate_image():
         # =====================================================
         if use_reference:
             try:
-                bottle_path = os.path.join(app.static_folder, 'photos', 'bottle-top.jpg')
-                if not os.path.exists(bottle_path):
-                    errors.append("Bottle reference photo not found at static/photos/bottle-top.jpg")
+                # Try best reference photo first, then fallbacks
+                bottle_candidates = [
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
+                    os.path.join(app.static_folder, 'photos', 'bottle-ref.jpg'),
+                ]
+                bottle_path = None
+                for candidate in bottle_candidates:
+                    if os.path.exists(candidate):
+                        bottle_path = candidate
+                        break
+                if not bottle_path:
+                    errors.append("No bottle reference photo found. Upload photos to static/photos/gallery/")
                 else:
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1024'
                     
                     with open(bottle_path, 'rb') as img_file:
+                        mime = 'image/png' if bottle_path.endswith('.png') else 'image/jpeg'
+                        ext = 'png' if bottle_path.endswith('.png') else 'jpg'
                         resp = req.post(
                             'https://api.openai.com/v1/images/edits',
                             headers={'Authorization': f'Bearer {api_key}'},
                             files={
-                                'image[]': ('forbidden-bottle.jpg', img_file, 'image/jpeg'),
+                                'image[]': (f'forbidden-bottle.{ext}', img_file, mime),
                             },
                             data={
                                 'model': 'gpt-image-1',
@@ -1179,6 +1250,25 @@ def api_ai_gallery():
         })
     except Exception as e:
         return jsonify({'items': []})
+
+
+def _get_featured_bottle_image():
+    """Return the URL of the best bottle photo for use in blog articles"""
+    # Prefer clean product shots with light backgrounds
+    candidates = [
+        'gallery/Black_Front_LightBG_V1.png',
+        'gallery/Golden_Front_57_LightBG_V1.png',
+        'gallery/Golden_Front_58_LightBG_V1.png',
+        'gallery/SingleBarrel1.jpg',
+        'gallery/SmallBatch1.jpg',
+        'bottle-ref.jpg',
+    ]
+    for fname in candidates:
+        fpath = os.path.join(app.static_folder, 'photos', fname)
+        if os.path.exists(fpath):
+            return f'/static/photos/{fname}'
+    return None
+
 
 def _save_to_gallery(media_type, url, prompt, revised_prompt):
     """Save generated media to gallery"""
@@ -1849,6 +1939,17 @@ def api_blog_generate():
             }
         
         word_count = len(article_data.get('content', '').split())
+        
+        # Auto-inject featured bottle image into article content
+        featured_image = _get_featured_bottle_image()
+        content = article_data.get('content', '')
+        if featured_image and '<img' not in content[:500]:
+            # Insert hero image after the first paragraph
+            first_p_end = content.find('</p>')
+            if first_p_end > 0:
+                img_html = f'\n<figure style="text-align:center;margin:24px 0;"><img src="{featured_image}" alt="Forbidden Bourbon" style="max-width:100%;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><figcaption style="font-size:0.85em;color:#888;margin-top:8px;">Forbidden Bourbon — A Twist on Tradition</figcaption></figure>\n'
+                content = content[:first_p_end + 4] + img_html + content[first_p_end + 4:]
+                article_data['content'] = content
         
         # Save to database
         article_id = db.create_blog_article(
