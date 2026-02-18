@@ -984,7 +984,7 @@ def api_generate_image():
                 
                 # Step 1: Get/create bottle cutout (cached per bottle type)
                 cutout_suffix = 'sb' if bottle_type == 'small_batch' else 'sgl'
-                cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}-v3.png')
+                cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}-v4.png')
                 
                 if not os.path.exists(cutout_path):
                     # Source photos per bottle type
@@ -1009,31 +1009,32 @@ def api_generate_image():
                         print(f"[AI Studio] Creating {bottle_type} cutout from {source_path}")
                         img = PILImage.open(source_path).convert('RGBA')
                         
-                        # Try rembg for best quality cutout
-                        cutout = None
-                        try:
-                            from rembg import remove as rembg_remove
-                            print("[AI Studio] Using rembg for AI background removal")
-                            cutout = rembg_remove(img)
-                        except Exception as rembg_err:
-                            print(f"[AI Studio] rembg failed ({rembg_err}), using enhanced threshold")
-                            # Enhanced threshold fallback
-                            data_arr = np.array(img)
-                            r, g, b = data_arr[:,:,0].astype(float), data_arr[:,:,1].astype(float), data_arr[:,:,2].astype(float)
-                            brightness = (r + g + b) / 3.0
-                            
-                            # Create alpha mask
-                            alpha = np.ones(brightness.shape, dtype=np.float32) * 255
-                            
-                            # Hard removal of bright background
-                            alpha[brightness > 230] = 0
-                            
-                            # Gradual fade for near-background pixels
-                            edge_zone = (brightness > 200) & (brightness <= 230)
-                            alpha[edge_zone] = 255 * (1 - (brightness[edge_zone] - 200) / 30.0)
-                            
-                            data_arr[:,:,3] = alpha.astype(np.uint8)
-                            cutout = PILImage.fromarray(data_arr)
+                        # Enhanced threshold background removal
+                        data_arr = np.array(img)
+                        r, g, b = data_arr[:,:,0].astype(float), data_arr[:,:,1].astype(float), data_arr[:,:,2].astype(float)
+                        
+                        # Sample actual background color from corners for better matching
+                        h, w = data_arr.shape[:2]
+                        corners = []
+                        for cy, cx in [(0,0), (0,w-1), (h-1,0), (h-1,w-1)]:
+                            for dy in range(min(20, h)):
+                                for dx in range(min(20, w)):
+                                    py, px = min(cy+dy, h-1), min(cx+dx if cx==0 else cx-dx, w-1)
+                                    corners.append(data_arr[py, px, :3].astype(float))
+                        corners = np.array(corners)
+                        bg_r, bg_g, bg_b = np.median(corners[:,0]), np.median(corners[:,1]), np.median(corners[:,2])
+                        
+                        # Distance from background color (better than pure brightness)
+                        dist = np.sqrt((r - bg_r)**2 + (g - bg_g)**2 + (b - bg_b)**2)
+                        
+                        # Create alpha: close to bg = transparent, far from bg = opaque
+                        alpha = np.ones(dist.shape, dtype=np.float32) * 255
+                        alpha[dist < 25] = 0  # Definitely background
+                        edge_zone = (dist >= 25) & (dist < 60)  # Transition zone
+                        alpha[edge_zone] = 255 * ((dist[edge_zone] - 25) / 35.0)
+                        
+                        data_arr[:,:,3] = np.clip(alpha, 0, 255).astype(np.uint8)
+                        cutout = PILImage.fromarray(data_arr)
                         
                         if cutout:
                             # Trim transparent edges
