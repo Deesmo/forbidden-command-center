@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+{% block title %}Brand Intel{% endblock %}
+
+{% block content %}
+<!-- HERO -->
+<div style="position: relative; margin: -16px -16px 16px -16px; height: 80px; overflow: hidden;">
+    <img src="/static/photos/bottle-top.jpg" alt="" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.15; filter: blur(2px);">
+    <div style="position: relative; z-index: 1; height: 100%; display: flex; align-items: center; padding: 0 16px;">
+        <div>
+            <h1 style="font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; color: var(--gold); margin: 0;">Brand Intel</h1>
+            <p style="font-size: 0.95rem; color: var(--text-muted); margin: 2px 0 0 0;">Every mention of Forbidden Bourbon across the web · <a href="/mash-analytics" style="color: var(--gold); text-decoration: none;">📊 Mash Analytics →</a></p>
+        </div>
+    </div>
+</div>
+
+<!-- STATS -->
+<div class="stats-grid" style="margin-bottom: 16px;">
+    <div class="stat-card accent">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.reviews }}</div>
+        <div class="stat-label">Reviews</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.features }}</div>
+        <div class="stat-label">Features</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.press }}</div>
+        <div class="stat-label">Press</div>
+    </div>
+</div>
+
+<!-- SCAN BUTTONS -->
+<div style="margin-bottom: 16px;">
+    <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+        <button class="btn btn-primary" id="quickScanBtn" onclick="runScan(false)" style="flex: 1;">🔍 Quick Scan</button>
+        <button class="btn btn-primary" id="deepScanBtn" onclick="runScan(true)" style="flex: 1; background: linear-gradient(135deg, var(--gold), #e0c070);">🌐 Deep Scan</button>
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <button class="btn btn-ghost btn-sm" onclick="fetchAllContent()" style="flex: 1; font-size: 0.95rem;">📥 Fetch All Full Content</button>
+    </div>
+    <div id="scanStatus" style="font-size: 1rem; color: var(--text-muted); text-align: center; margin-top: 6px;"></div>
+    <p style="font-size: 0.95rem; color: var(--text-muted); text-align: center; margin-top: 4px;">Quick = 8 searches · Deep = 30+ searches across reviews, YouTube, Reddit, podcasts, news, awards</p>
+</div>
+
+<!-- FILTER TABS -->
+<div class="filter-tabs" style="margin-bottom: 16px; flex-wrap: wrap; gap: 6px;">
+    <button class="filter-tab active" onclick="filterMentions('all', this)">All ({{ stats.total }})</button>
+    <button class="filter-tab" onclick="filterMentions('review', this)">⭐ Reviews ({{ stats.reviews }})</button>
+    <button class="filter-tab" onclick="filterMentions('feature', this)">📖 Features ({{ stats.features }})</button>
+    <button class="filter-tab" onclick="filterMentions('press', this)">📰 Press ({{ stats.press }})</button>
+    <button class="filter-tab" onclick="filterMentions('podcast', this)">🎙️ Podcasts ({{ stats.podcasts }})</button>
+    <button class="filter-tab" onclick="filterMentions('video', this)">🎬 Video ({{ stats.videos }})</button>
+    <button class="filter-tab" onclick="filterMentions('interview', this)">🎤 Interviews ({{ stats.interviews }})</button>
+    <button class="filter-tab" onclick="filterMentions('award', this)">🏆 Awards ({{ stats.awards }})</button>
+    <button class="filter-tab" onclick="filterMentions('event', this)">🎪 Events ({{ stats.events }})</button>
+    <button class="filter-tab" onclick="filterMentions('social', this)">💬 Social ({{ stats.social }})</button>
+    <button class="filter-tab" onclick="filterMentions('own_site', this)">🏠 Our Sites ({{ stats.own_site }})</button>
+    <button class="filter-tab" onclick="filterMentions('starred', this)">★ Starred ({{ stats.starred }})</button>
+    <button class="filter-tab" onclick="switchView('add', this)">＋ Add</button>
+</div>
+
+<!-- MENTIONS LIST -->
+<div id="mentionsList">
+    {% if mentions %}
+    {% for m in mentions %}
+    <div class="card mention-card" style="margin-bottom: 10px;" data-type="{{ m.source_type }}" data-starred="{{ m.starred }}" id="mention-{{ m.id }}">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div style="flex: 1; cursor: pointer;" onclick="toggleMention({{ m.id }})">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                    <span style="font-size: 0.95rem;">
+                        {% if m.source_type == 'review' %}⭐{% elif m.source_type == 'feature' %}📖{% elif m.source_type == 'press' %}📰{% elif m.source_type == 'podcast' %}🎙️{% elif m.source_type == 'video' %}🎬{% elif m.source_type == 'interview' %}🎤{% elif m.source_type == 'award' %}🏆{% elif m.source_type == 'event' %}🎪{% elif m.source_type == 'social' %}💬{% elif m.source_type == 'own_site' %}🏠{% else %}📰{% endif %}
+                    </span>
+                    <span style="font-size: 1rem; color: var(--gold); text-transform: uppercase; letter-spacing: 0.05em;">{{ m.source_type | replace('_', ' ') }}</span>
+                    <span style="font-size: 1rem; color: var(--text-muted);">· {{ m.source }}</span>
+                    {% if m.full_content %}<span style="font-size: 0.85rem; background: rgba(74,222,128,0.15); color: #4ade80; padding: 1px 6px; border-radius: 8px;">Full Text</span>{% endif %}
+                </div>
+                <h3 style="color: var(--text-primary); font-size: 1rem; margin: 0; line-height: 1.4;">{{ m.title }}</h3>
+            </div>
+            <button onclick="toggleStar({{ m.id }})" style="background: none; border: none; cursor: pointer; font-size: 1.1rem; padding: 0 4px;" id="star-{{ m.id }}">
+                {% if m.starred %}★{% else %}☆{% endif %}
+            </button>
+        </div>
+        
+        {% if m.snippet %}
+        <p style="font-size: 1rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 6px;">{{ m.snippet[:200] }}{% if m.snippet|length > 200 %}...{% endif %}</p>
+        {% endif %}
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 1rem; color: var(--text-muted);">
+            <span>{{ m.created_at[:10] if m.created_at else '' }}</span>
+            <div style="display: flex; gap: 8px;">
+                {% if m.url %}<a href="{{ m.url }}" target="_blank" style="color: var(--gold);">Visit →</a>{% endif %}
+                {% if m.full_content %}<button onclick="copyMention({{ m.id }})" style="color: var(--gold); background: none; border: none; cursor: pointer; font-size: 1rem;">📋 Copy</button>{% endif %}
+                <button onclick="fetchContent({{ m.id }})" style="color: var(--gold); background: none; border: none; cursor: pointer; font-size: 1rem;">{% if m.full_content %}🔄 Refetch{% else %}📥 Fetch Full{% endif %}</button>
+                <button onclick="deleteMention({{ m.id }})" style="color: #f87171; background: none; border: none; cursor: pointer; font-size: 1rem;">Delete</button>
+            </div>
+        </div>
+        
+        <!-- EXPANDABLE FULL CONTENT -->
+        <div id="full-{{ m.id }}" class="hidden" style="margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;">
+            {% if m.url %}<div style="font-size: 1rem; color: var(--text-muted); margin-bottom: 6px; word-break: break-all;">URL: <a href="{{ m.url }}" target="_blank" style="color: var(--gold);">{{ m.url }}</a></div>{% endif %}
+            {% if m.author %}<div style="font-size: 1rem; color: var(--text-muted); margin-bottom: 6px;">Author: {{ m.author }}</div>{% endif %}
+            {% if m.full_content %}
+            <div style="font-size: 1rem; line-height: 1.7; color: var(--text-secondary); max-height: 400px; overflow-y: auto; white-space: pre-wrap; padding: 10px; background: rgba(0,0,0,0.15); border-radius: 6px;">{{ m.full_content }}</div>
+            {% else %}
+            <div style="font-size: 0.95rem; color: var(--text-muted); font-style: italic;">Full content not fetched yet — tap "Fetch Full" to download</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="card" style="text-align: center; padding: 32px;">
+        <div style="font-size: 2.5rem; margin-bottom: 10px;">🔍</div>
+        <p style="color: var(--text-muted); font-size: 1rem; margin-bottom: 12px;">No mentions found yet.</p>
+        <p style="color: var(--text-muted); font-size: 1rem;">Tap "Scan the Web" to search for all Forbidden Bourbon content across the internet.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ADD MANUALLY -->
+<div id="addView" class="hidden">
+    <div class="card" style="margin-bottom: 12px;">
+        <h3 style="color: var(--gold); font-size: 1rem; margin-bottom: 12px;">Add Mention Manually</h3>
+        <p style="font-size: 0.95rem; color: var(--text-muted); margin-bottom: 12px;">Found something the scanner missed? Add it here.</p>
+        
+        <input type="text" class="form-input" id="addTitle" placeholder="Title or headline..." style="margin-bottom: 8px;">
+        <input type="text" class="form-input" id="addUrl" placeholder="URL..." style="margin-bottom: 8px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <input type="text" class="form-input" id="addSource" placeholder="Source (e.g. YouTube, Reddit)" style="flex: 1;">
+            <select class="form-input" id="addType" style="flex: 1;">
+                <option value="review">Review</option>
+                <option value="feature">Feature</option>
+                <option value="press">Press</option>
+                <option value="podcast">Podcast</option>
+                <option value="video">Video</option>
+                <option value="interview">Interview</option>
+                <option value="award">Award</option>
+                <option value="event">Event</option>
+                <option value="social">Social Post</option>
+                <option value="own_site">Own Site</option>
+                <option value="article">Other</option>
+            </select>
+        </div>
+        <textarea class="form-input" id="addSnippet" rows="2" placeholder="Description or snippet..." style="margin-bottom: 8px;"></textarea>
+        <input type="text" class="form-input" id="addAuthor" placeholder="Author (optional)" style="margin-bottom: 10px;">
+        <button class="btn btn-primary btn-block" onclick="addMention()">+ Add Mention</button>
+    </div>
+</div>
+
+<script>
+let currentFilter = 'all';
+
+function filterMentions(type, btn) {
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = type;
+    
+    document.getElementById('mentionsList').classList.remove('hidden');
+    document.getElementById('addView').classList.add('hidden');
+    
+    document.querySelectorAll('.mention-card').forEach(card => {
+        if (type === 'all') {
+            card.style.display = '';
+        } else if (type === 'starred') {
+            card.style.display = card.dataset.starred === '1' ? '' : 'none';
+        } else {
+            card.style.display = card.dataset.type === type ? '' : 'none';
+        }
+    });
+    
+    // Scroll to the mentions list so filtered results are visible
+    document.getElementById('mentionsList').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function switchView(view, btn) {
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('mentionsList').classList.add('hidden');
+    document.getElementById('addView').classList.remove('hidden');
+}
+
+function toggleMention(id) {
+    const el = document.getElementById('full-' + id);
+    if (el) el.classList.toggle('hidden');
+}
+
+async function runScan(deep) {
+    const btnId = deep ? 'deepScanBtn' : 'quickScanBtn';
+    const btn = document.getElementById(btnId);
+    const status = document.getElementById('scanStatus');
+    const label = deep ? '🌐 Deep Scanning... (2-3 minutes)' : '🔍 Quick Scanning... (30-60 sec)';
+    btn.textContent = label;
+    btn.disabled = true;
+    document.getElementById('quickScanBtn').disabled = true;
+    document.getElementById('deepScanBtn').disabled = true;
+    status.textContent = deep ? 'Running deep search across bourbon media sites...' : 'Running quick search for new Forbidden Bourbon content...';
+    
+    try {
+        const resp = await fetch('/api/brand-intel/scan', { 
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ deep })
+        });
+        const data = await safeJSON(resp);
+        if (data.success) {
+            status.textContent = data.message || `Found ${data.found} results — ${data.saved} new, ${data.skipped_duplicates} already in library`;
+            showToast(`${data.mode} scan: ${data.saved} new mentions found`, 'success');
+            if (data.saved > 0) setTimeout(() => location.reload(), 2000);
+        } else {
+            status.textContent = data.error || 'Scan failed';
+            showToast('Scan failed', 'error');
+        }
+    } catch (err) {
+        status.textContent = 'Error: ' + err.message;
+        showToast('Error: ' + err.message, 'error');
+    }
+    
+    document.getElementById('quickScanBtn').textContent = '🔍 Quick Scan';
+    document.getElementById('deepScanBtn').textContent = '🌐 Deep Scan';
+    document.getElementById('quickScanBtn').disabled = false;
+    document.getElementById('deepScanBtn').disabled = false;
+}
+
+async function fetchAllContent() {
+    showToast('Fetching full content for all mentions...', 'success');
+    const cards = document.querySelectorAll('.mention-card');
+    let fetched = 0;
+    for (const card of cards) {
+        const id = card.id.replace('mention-', '');
+        const fullDiv = document.getElementById('full-' + id);
+        // Skip if already has content
+        if (fullDiv && fullDiv.querySelector('.fetched-content')) continue;
+        try {
+            const resp = await fetch('/api/brand-intel/fetch-content/' + id, { method: 'POST' });
+            const data = await safeJSON(resp);
+            if (data.success) fetched++;
+        } catch (e) {}
+    }
+    showToast(`Fetched full content for ${fetched} mentions`, 'success');
+    if (fetched > 0) setTimeout(() => location.reload(), 1500);
+}
+
+async function toggleStar(id) {
+    try {
+        const resp = await fetch('/api/brand-intel/star/' + id, { method: 'POST' });
+        const data = await safeJSON(resp);
+        if (data.success) {
+            const star = document.getElementById('star-' + id);
+            const card = document.getElementById('mention-' + id);
+            star.textContent = data.starred ? '★' : '☆';
+            card.dataset.starred = data.starred.toString();
+        }
+    } catch (err) { showToast('Error', 'error'); }
+}
+
+async function fetchContent(id) {
+    showToast('Fetching full content...', 'success');
+    try {
+        const resp = await fetch('/api/brand-intel/fetch-content/' + id, { method: 'POST' });
+        const data = await safeJSON(resp);
+        if (data.success) {
+            const contentDiv = document.getElementById('full-' + id);
+            if (contentDiv) {
+                contentDiv.classList.remove('hidden');
+                // Replace or add content area
+                let existing = contentDiv.querySelector('.fetched-content');
+                if (!existing) {
+                    existing = document.createElement('div');
+                    existing.className = 'fetched-content';
+                    existing.style.cssText = 'font-size:1rem;line-height:1.7;color:var(--text-secondary);max-height:400px;overflow-y:auto;white-space:pre-wrap;padding:10px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;';
+                    contentDiv.appendChild(existing);
+                }
+                existing.textContent = data.content;
+            }
+            showToast('Content fetched!', 'success');
+        } else { showToast(data.error || 'Could not fetch', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function deleteMention(id) {
+    if (!confirm('Delete this mention?')) return;
+    try {
+        var resp = await fetch('/api/brand-intel/mentions/' + id, { method: 'DELETE' });
+        var data = await safeJSON(resp);
+        if (data.success !== false) {
+            document.getElementById('mention-' + id).remove();
+            showToast('Deleted', 'success');
+        } else { showToast(data.error || 'Delete failed', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+function copyMention(id) {
+    const fullDiv = document.getElementById('full-' + id);
+    const card = document.getElementById('mention-' + id);
+    const title = card.querySelector('h3') ? card.querySelector('h3').textContent : '';
+    let content = '';
+    if (fullDiv) {
+        const contentEl = fullDiv.querySelector('.fetched-content') || fullDiv.querySelector('div[style*="pre-wrap"]');
+        if (contentEl) content = contentEl.textContent;
+    }
+    const text = title + '\n\n' + content;
+    navigator.clipboard.writeText(text);
+    showToast('Copied to clipboard!', 'success');
+}
+
+async function addMention() {
+    const title = document.getElementById('addTitle').value.trim();
+    if (!title) { showToast('Enter a title', 'error'); return; }
+    
+    try {
+        var resp = await fetch('/api/brand-intel/add', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                title,
+                url: document.getElementById('addUrl').value,
+                source: document.getElementById('addSource').value,
+                source_type: document.getElementById('addType').value,
+                snippet: document.getElementById('addSnippet').value,
+                author: document.getElementById('addAuthor').value
+            })
+        });
+        var data = await safeJSON(resp);
+        if (data.success !== false) {
+            showToast('Mention added!', 'success');
+            location.reload();
+        } else { showToast(data.error || 'Failed to add', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+</script>
+{% endblock %}

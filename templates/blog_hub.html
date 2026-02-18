@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% block title %}Blog Hub{% endblock %}
+
+{% block content %}
+<!-- BLOG HERO -->
+<div style="position: relative; margin: -16px -16px 16px -16px; height: 80px; overflow: hidden;">
+    <img src="/static/photos/mash-networks-banner.jpg" alt="" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.2; filter: blur(1px);">
+    <div style="position: relative; z-index: 1; height: 100%; display: flex; align-items: center; padding: 0 16px;">
+        <div>
+            <h1 style="font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; color: var(--gold); margin: 0;">Blog Hub</h1>
+            <p style="font-size: 1.05rem; color: var(--text-muted); margin: 2px 0 0 0;">Create & publish everywhere</p>
+        </div>
+    </div>
+</div>
+
+<!-- STATS -->
+<div class="stats-grid" style="margin-bottom: 12px;">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Articles</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.published }}</div><div class="stat-label">Published</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.drafts }}</div><div class="stat-label">Drafts</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.topics }}</div><div class="stat-label">Topics</div></div>
+</div>
+
+<!-- MODE TABS -->
+<div class="filter-tabs" style="margin-bottom: 16px;">
+    <button class="filter-tab active" onclick="switchMode('blog', this)">✦ Blog</button>
+    <button class="filter-tab" onclick="switchMode('reddit', this)">🤖 Reddit</button>
+    <button class="filter-tab" onclick="switchMode('quora', this)">❓ Quora</button>
+    <button class="filter-tab" onclick="switchMode('topics', this)">💡 Topics</button>
+    <button class="filter-tab" onclick="switchMode('setup', this)">🔗 Setup</button>
+</div>
+
+<!-- ==================== BLOG GENERATOR ==================== -->
+<div id="blogMode">
+    <div class="card" style="margin-bottom: 16px;">
+        <h3 style="color: var(--gold); font-size: 1.05rem; margin-bottom: 12px;">✦ Generate Blog Article</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 10px;">Long-form SEO content for WordPress, Blogger, Medium</p>
+        <select id="topicSelect" class="form-input" style="margin-bottom: 8px;" onchange="if(this.value){document.getElementById('blogTopic').value=this.value; document.getElementById('blogKeywords').value=this.options[this.selectedIndex].dataset.keywords||'';}">
+            <option value="">— Choose from topic library —</option>
+            {% for topic in topics %}
+            <option value="{{ topic.title }}" data-keywords="{{ topic.keywords }}">{{ topic.title }} ({{ topic.category }})</option>
+            {% endfor %}
+        </select>
+        <input type="text" class="form-input" id="blogTopic" placeholder="Or type a custom topic..." style="margin-bottom: 8px;">
+        <input type="text" class="form-input" id="blogKeywords" placeholder="SEO keywords (optional)" style="margin-bottom: 8px;">
+        <textarea class="form-input" id="blogCustomPrompt" rows="2" placeholder="Custom instructions (optional)" style="margin-bottom: 10px;"></textarea>
+        <button class="btn btn-primary btn-block" id="generateBtn" onclick="doGenerate()">✦ Generate Article</button>
+    </div>
+</div>
+
+<!-- ==================== REDDIT GENERATOR ==================== -->
+<div id="redditMode" class="hidden">
+    <div class="card" style="margin-bottom: 16px; border-left: 3px solid #ff4500;">
+        <h3 style="color: #ff4500; font-size: 1.05rem; margin-bottom: 4px;">🤖 Reddit Post Generator</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 10px;">Authentic bourbon fan posts — Google indexes Reddit, LLMs train on it</p>
+        <select id="redditSubreddit" class="form-input" style="margin-bottom: 8px;">
+            <option value="bourbon">r/bourbon</option>
+            <option value="whiskey">r/whiskey</option>
+            <option value="cocktails">r/cocktails</option>
+            <option value="Kentucky">r/Kentucky</option>
+            <option value="alcohol">r/alcohol</option>
+            <option value="craftspirits">r/craftspirits</option>
+        </select>
+        <select id="redditTopicSelect" class="form-input" style="margin-bottom: 8px;" onchange="if(this.value) document.getElementById('redditTopic').value=this.value">
+            <option value="">— Quick picks —</option>
+            <option value="What's your go-to wheated bourbon?">Wheated bourbon recs</option>
+            <option value="Anyone tried small batch from Bardstown area?">Bardstown small batch</option>
+            <option value="Best bourbon cocktail for a whiskey newbie?">Best intro cocktail</option>
+            <option value="Wheated vs rye bourbon - what do you prefer?">Wheated vs rye</option>
+            <option value="Top bourbon under $60 that people sleep on?">Underrated bourbons</option>
+        </select>
+        <input type="text" class="form-input" id="redditTopic" placeholder="Or write your own topic..." style="margin-bottom: 10px;">
+        <button class="btn btn-block" id="redditGenBtn" onclick="doReddit()" style="background: #ff4500; color: white; border: none;">🤖 Generate Reddit Post</button>
+    </div>
+</div>
+
+<!-- ==================== QUORA GENERATOR ==================== -->
+<div id="quoraMode" class="hidden">
+    <div class="card" style="margin-bottom: 16px; border-left: 3px solid #b92b27;">
+        <h3 style="color: #b92b27; font-size: 1.05rem; margin-bottom: 4px;">❓ Quora Answer Generator</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 10px;">Expert answers — Quora ranks #1 on Google for millions of queries</p>
+        <select id="quoraSelect" class="form-input" style="margin-bottom: 8px;" onchange="if(this.value) document.getElementById('quoraTopic').value=this.value">
+            <option value="">— Popular bourbon questions —</option>
+            <option value="What is the best wheated bourbon?">Best wheated bourbon?</option>
+            <option value="What bourbon should I buy as a gift?">Bourbon gift ideas?</option>
+            <option value="How do you drink bourbon properly?">How to drink bourbon?</option>
+            <option value="What's the best bourbon for cocktails?">Best cocktail bourbon?</option>
+            <option value="Is wheated bourbon smoother than rye?">Wheated vs rye smoothness?</option>
+            <option value="Who are the best female distillers in America?">Best female distillers?</option>
+        </select>
+        <input type="text" class="form-input" id="quoraTopic" placeholder="Or type any question..." style="margin-bottom: 10px;">
+        <button class="btn btn-block" id="quoraGenBtn" onclick="doQuora()" style="background: #b92b27; color: white; border: none;">❓ Generate Answer</button>
+    </div>
+    <div class="card" style="background: rgba(185,43,39,0.06); border: 1px solid rgba(185,43,39,0.15);">
+        <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">
+            <strong style="color: #b92b27;">💡 Strategy:</strong> Search Quora for bourbon questions with lots of followers but few answers. Paste your generated answer, tweak slightly. 2-3/week compounds fast.
+        </p>
+    </div>
+</div>
+
+<!-- ==================== TOPICS ==================== -->
+<div id="topicsMode" class="hidden">
+    <div class="card" style="margin-bottom: 10px;">
+        <h3 style="color: var(--gold); font-size: 1rem; margin-bottom: 8px;">Add Topic</h3>
+        <input type="text" class="form-input" id="newTopicTitle" placeholder="Topic title..." style="margin-bottom: 8px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <select class="form-input" id="newTopicCategory" style="flex: 1;"><option value="education">Education</option><option value="cocktails">Cocktails</option><option value="culture">Culture</option><option value="pairing">Food Pairing</option><option value="seasonal">Seasonal</option><option value="general">General</option></select>
+            <input type="text" class="form-input" id="newTopicKeywords" placeholder="Keywords..." style="flex: 1.5;">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="addTopic()">+ Add Topic</button>
+    </div>
+    <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px;">{{ topics|length }} topics — least used first</div>
+    {% for topic in topics %}
+    <div style="padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; display: flex; justify-content: space-between;">
+        <span style="color: var(--text-primary);">{{ topic.title }} <span style="color: var(--text-muted);">({{ topic.category }})</span></span>
+        <span style="color: var(--text-muted);">{% if topic.times_used > 0 %}{{ topic.times_used }}x{% else %}new{% endif %}</span>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- ==================== SETUP ==================== -->
+<div id="setupMode" class="hidden">
+    <div class="card" style="margin-bottom: 8px;">
+        <div style="font-size: 0.95rem; color: var(--text-secondary); line-height: 1.6;">
+            <strong>📰 WordPress:</strong> <code style="color: var(--gold);">WORDPRESS_SITE</code> + <code style="color: var(--gold);">WORDPRESS_TOKEN</code><br>
+            <strong>📢 Blogger:</strong> <code style="color: var(--gold);">BLOGGER_BLOG_ID</code> + <code style="color: var(--gold);">GOOGLE_CLIENT_ID</code> + <code style="color: var(--gold);">GOOGLE_CLIENT_SECRET</code> → <a href="/auth/blogger/start" style="color: var(--gold);">Connect</a><br>
+            <strong>📝 Medium:</strong> <code style="color: var(--gold);">MEDIUM_TOKEN</code> or use import workaround<br>
+            <strong>🤖 Reddit:</strong> <code style="color: var(--gold);">REDDIT_CLIENT_ID</code> + <code style="color: var(--gold);">REDDIT_CLIENT_SECRET</code> + <code style="color: var(--gold);">REDDIT_USERNAME</code> + <code style="color: var(--gold);">REDDIT_PASSWORD</code>
+        </div>
+    </div>
+    <div class="card" style="background: rgba(200,164,94,0.06);">
+        <div style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.7;">
+            <strong>Auto-Schedule:</strong> Mon → Medium · Tue → Reddit · Wed → WordPress · Thu → Reddit · Fri → Blogger
+        </div>
+    </div>
+</div>
+
+<!-- PREVIEW (appears after generating) -->
+<div class="card hidden" id="previewCard" style="margin-bottom: 16px; border-left: 3px solid var(--gold);">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+        <h3 style="color: var(--gold); font-size: 1rem; margin: 0;">✦ Just Generated</h3>
+        <span id="wordCount" style="font-size: 0.9rem; color: var(--text-muted);"></span>
+    </div>
+    <h2 id="previewTitle" style="font-size: 1.05rem; color: var(--text-primary); margin-bottom: 6px;"></h2>
+    <p id="previewExcerpt" style="font-size: 0.9rem; color: var(--text-muted); font-style: italic; margin-bottom: 8px;"></p>
+    <div id="previewContent" style="font-size: 0.9rem; line-height: 1.6; color: var(--text-secondary); max-height: 180px; overflow-y: auto;"></div>
+    <!-- Blog/Reddit publish buttons -->
+    <div id="previewPubBtns" style="margin-top: 10px;">
+        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px;">Publish to:</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button onclick="pubNew('wordpress')" style="font-size: 0.9rem; background: var(--gold); color: var(--bg-dark); border: none; padding: 5px 11px; border-radius: 10px; cursor: pointer; font-weight: 600;">📰 WordPress</button>
+            <button onclick="pubNew('blogger')" style="font-size: 0.9rem; background: var(--gold); color: var(--bg-dark); border: none; padding: 5px 11px; border-radius: 10px; cursor: pointer; font-weight: 600;">📢 Blogger</button>
+            <button onclick="pubNew('medium')" style="font-size: 0.9rem; background: var(--gold); color: var(--bg-dark); border: none; padding: 5px 11px; border-radius: 10px; cursor: pointer; font-weight: 600;">📝 Medium</button>
+            <button onclick="pubNew('reddit')" style="font-size: 0.9rem; background: #ff4500; color: white; border: none; padding: 5px 11px; border-radius: 10px; cursor: pointer; font-weight: 600;">🤖 Reddit</button>
+        </div>
+    </div>
+    <!-- Quora copy button (shown instead of publish for Quora) -->
+    <div id="previewQuoraBtns" class="hidden" style="margin-top: 10px;">
+        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px;">Copy and paste into Quora:</div>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('previewContent').innerText); showToast('Copied! Paste into Quora','success');" style="font-size: 0.95rem; background: #b92b27; color: white; border: none; padding: 8px 16px; border-radius: 10px; cursor: pointer; font-weight: 600; width: 100%;">📋 Copy Answer to Clipboard</button>
+    </div>
+    <div style="display: flex; gap: 6px; margin-top: 8px;">
+        <button onclick="navigator.clipboard.writeText(document.getElementById('previewContent').innerText); showToast('Copied!','success');" style="font-size: 0.85rem; color: var(--text-muted); background: none; border: 1px solid var(--border); padding: 3px 9px; border-radius: 9px; cursor: pointer;">📋 Copy</button>
+    </div>
+</div>
+
+<!-- ARTICLES FILTER -->
+<div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+    <h3 style="color: var(--gold); font-size: 1rem; margin: 0;">📄 Articles</h3>
+    <div style="display: flex; gap: 4px;">
+        <button class="filter-tab active" onclick="filterArticles('all', this)" style="font-size: 0.78rem; padding: 3px 9px;">All</button>
+        <button class="filter-tab" onclick="filterArticles('draft', this)" style="font-size: 0.78rem; padding: 3px 9px;">Drafts</button>
+        <button class="filter-tab" onclick="filterArticles('published', this)" style="font-size: 0.78rem; padding: 3px 9px;">Published</button>
+    </div>
+</div>
+
+{% if articles %}
+{% for article in articles %}
+{% set pplats = article.published_platforms if article.published_platforms and article.published_platforms != '{}' else '{}' %}
+<div class="card article-card" data-status="{{ article.status }}" style="margin-bottom: 10px;">
+    <div style="cursor: pointer;" onclick="var c=document.getElementById('c{{ article.id }}'); c.classList.toggle('hidden');">
+        <h3 style="color: var(--text-primary); font-size: 1rem; margin: 0 0 5px 0;">{{ article.title }}</h3>
+        <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+            {% if article.status == 'draft' %}
+            <span style="font-size: 0.78rem; background: rgba(200,164,94,0.15); color: var(--gold); padding: 2px 7px; border-radius: 8px;">Draft</span>
+            {% endif %}
+            {% if pplats != '{}' %}
+                {% if 'wordpress' in pplats %}<span style="font-size: 0.78rem; background: rgba(74,222,128,0.15); color: #4ade80; padding: 2px 7px; border-radius: 8px;">✓ WP</span>{% endif %}
+                {% if 'blogger' in pplats %}<span style="font-size: 0.78rem; background: rgba(74,222,128,0.15); color: #4ade80; padding: 2px 7px; border-radius: 8px;">✓ Blogger</span>{% endif %}
+                {% if 'medium' in pplats %}<span style="font-size: 0.78rem; background: rgba(74,222,128,0.15); color: #4ade80; padding: 2px 7px; border-radius: 8px;">✓ Medium</span>{% endif %}
+                {% if 'reddit' in pplats %}<span style="font-size: 0.78rem; background: rgba(255,69,0,0.15); color: #ff6b3d; padding: 2px 7px; border-radius: 8px;">✓ Reddit</span>{% endif %}
+                {% if 'pinterest' in pplats %}<span style="font-size: 0.78rem; background: rgba(74,222,128,0.15); color: #4ade80; padding: 2px 7px; border-radius: 8px;">✓ Pinterest</span>{% endif %}
+            {% elif article.platform_url and article.platform %}
+                <span style="font-size: 0.78rem; background: rgba(74,222,128,0.15); color: #4ade80; padding: 2px 7px; border-radius: 8px;">✓ {{ article.platform }}</span>
+            {% endif %}
+            <span style="font-size: 0.78rem; color: var(--text-muted);">{{ article.word_count }}w · {{ article.created_at[:10] if article.created_at else '' }}</span>
+        </div>
+    </div>
+    
+    <div class="hidden" id="c{{ article.id }}" style="margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;">
+        {% if article.excerpt %}<p style="font-size: 0.9rem; color: var(--text-muted); font-style: italic; margin-bottom: 8px;">{{ article.excerpt }}</p>{% endif %}
+        <div id="body{{ article.id }}" style="font-size: 0.9rem; line-height: 1.6; color: var(--text-secondary); max-height: 200px; overflow-y: auto;">{{ article.content | safe }}</div>
+        
+        {% if pplats != '{}' %}
+            {% if 'wordpress' in pplats %}<a href="{{ article.platform_url if article.platform == 'wordpress' else '#' }}" target="_blank" style="display: inline-block; margin-top: 8px; margin-right: 10px; font-size: 0.9rem; color: var(--gold);">🔗 WordPress →</a>{% endif %}
+            {% if 'blogger' in pplats %}<a href="{{ article.platform_url if article.platform == 'blogger' else '#' }}" target="_blank" style="display: inline-block; margin-top: 8px; margin-right: 10px; font-size: 0.9rem; color: var(--gold);">🔗 Blogger →</a>{% endif %}
+            {% if 'medium' in pplats %}<a href="{{ article.platform_url if article.platform == 'medium' else '#' }}" target="_blank" style="display: inline-block; margin-top: 8px; margin-right: 10px; font-size: 0.9rem; color: var(--gold);">🔗 Medium →</a>{% endif %}
+        {% elif article.platform_url %}
+            <a href="{{ article.platform_url }}" target="_blank" style="display: inline-block; margin-top: 8px; font-size: 0.9rem; color: var(--gold);">🔗 View on {{ article.platform }} →</a>
+        {% endif %}
+        
+        <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 5px;">Publish to:</div>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+            <button onclick="quickPub({{ article.id }}, 'wordpress', {{ 'true' if 'wordpress' in pplats else 'false' }})" style="font-size: 0.85rem; background: var(--gold); color: var(--bg-dark); border: none; padding: 4px 9px; border-radius: 9px; cursor: pointer; {% if 'wordpress' in pplats %}opacity: 0.35;{% endif %}">📰 WP {% if 'wordpress' in pplats %}✓{% endif %}</button>
+            <button onclick="quickPub({{ article.id }}, 'blogger', {{ 'true' if 'blogger' in pplats else 'false' }})" style="font-size: 0.85rem; background: var(--gold); color: var(--bg-dark); border: none; padding: 4px 9px; border-radius: 9px; cursor: pointer; {% if 'blogger' in pplats %}opacity: 0.35;{% endif %}">📢 Blogger {% if 'blogger' in pplats %}✓{% endif %}</button>
+            <button onclick="quickPub({{ article.id }}, 'medium', {{ 'true' if 'medium' in pplats else 'false' }})" style="font-size: 0.85rem; background: var(--gold); color: var(--bg-dark); border: none; padding: 4px 9px; border-radius: 9px; cursor: pointer; {% if 'medium' in pplats %}opacity: 0.35;{% endif %}">📝 Medium {% if 'medium' in pplats %}✓{% endif %}</button>
+            <button onclick="quickPub({{ article.id }}, 'reddit', {{ 'true' if 'reddit' in pplats else 'false' }})" style="font-size: 0.85rem; background: #ff4500; color: white; border: none; padding: 4px 9px; border-radius: 9px; cursor: pointer; {% if 'reddit' in pplats %}opacity: 0.35;{% endif %}">🤖 Reddit {% if 'reddit' in pplats %}✓{% endif %}</button>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 8px;">
+            <button onclick="navigator.clipboard.writeText(document.getElementById('body{{ article.id }}').innerText); showToast('Copied!','success');" style="font-size: 0.85rem; color: var(--text-muted); background: none; border: 1px solid var(--border); padding: 3px 9px; border-radius: 9px; cursor: pointer;">📋 Copy</button>
+            <button onclick="if(confirm('Delete this article?')){fetch('/api/blog/articles/{{ article.id }}',{method:'DELETE'}).then(safeJSON).then(function(d){if(d.success!==false){location.reload();}else{showToast(d.error||'Delete failed','error');}}).catch(function(){showToast('Delete failed','error');});}" style="font-size: 0.85rem; color: #f87171; background: none; border: none; cursor: pointer; margin-left: auto;">🗑 Delete</button>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card" style="text-align: center; padding: 20px;">
+    <p style="color: var(--text-muted); font-size: 0.95rem;">No articles yet. Generate your first one above!</p>
+</div>
+{% endif %}
+
+<script>
+var newArticleId = null;
+var lastGenType = 'blog';
+
+function switchMode(mode, btn) {
+    btn.parentElement.querySelectorAll('.filter-tab').forEach(function(t) { t.classList.remove('active'); });
+    btn.classList.add('active');
+    ['blogMode','redditMode','quoraMode','topicsMode','setupMode'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', id !== mode + 'Mode');
+    });
+}
+
+function filterArticles(status, btn) {
+    btn.parentElement.querySelectorAll('.filter-tab').forEach(function(t) { t.classList.remove('active'); });
+    btn.classList.add('active');
+    document.querySelectorAll('.article-card').forEach(function(card) {
+        if (status === 'all') { card.style.display = ''; }
+        else { card.style.display = card.dataset.status === status ? '' : 'none'; }
+    });
+}
+
+function showPreview(title, excerpt, content, wordCount) {
+    document.getElementById('previewTitle').textContent = title;
+    document.getElementById('previewExcerpt').textContent = excerpt;
+    document.getElementById('previewContent').innerHTML = content;
+    document.getElementById('wordCount').textContent = wordCount;
+    document.getElementById('previewCard').classList.remove('hidden');
+    if (lastGenType === 'quora') {
+        document.getElementById('previewPubBtns').classList.add('hidden');
+        document.getElementById('previewQuoraBtns').classList.remove('hidden');
+    } else {
+        document.getElementById('previewPubBtns').classList.remove('hidden');
+        document.getElementById('previewQuoraBtns').classList.add('hidden');
+    }
+}
+
+async function doGenerate() {
+    var topic = document.getElementById('blogTopic').value.trim();
+    if (!topic) { showToast('Enter a topic first', 'error'); return; }
+    var btn = document.getElementById('generateBtn');
+    btn.textContent = 'Generating...'; btn.disabled = true;
+    try {
+        var data = await apiCall('/api/blog/generate', 'POST', {
+            topic: topic,
+            keywords: document.getElementById('blogKeywords').value,
+            custom_prompt: document.getElementById('blogCustomPrompt').value
+        });
+        if (data.success) {
+            newArticleId = data.article.id;
+            lastGenType = 'blog';
+            showPreview(data.article.title, data.article.excerpt || '', data.article.content || '', (data.article.word_count || '') + ' words');
+            showToast('Article generated!', 'success');
+            setTimeout(function() { window.location.reload(); }, 2500);
+        } else { showToast(data.error || 'Generation failed', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    btn.textContent = '✦ Generate Article'; btn.disabled = false;
+}
+
+async function doReddit() {
+    var topic = document.getElementById('redditTopic').value.trim();
+    if (!topic) { showToast('Enter a topic', 'error'); return; }
+    var btn = document.getElementById('redditGenBtn');
+    btn.textContent = 'Generating...'; btn.disabled = true;
+    try {
+        var data = await apiCall('/api/blog/generate-reddit', 'POST', {
+            topic: topic, subreddit: document.getElementById('redditSubreddit').value
+        });
+        if (data.success) {
+            newArticleId = data.article.id;
+            lastGenType = 'blog';
+            showPreview(data.article.title || '', 'r/' + (data.article.subreddit || ''), data.article.body || data.article.content || '', '');
+            showToast('Reddit post ready!', 'success');
+            setTimeout(function() { window.location.reload(); }, 2500);
+        } else { showToast(data.error || 'Failed', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    btn.textContent = '🤖 Generate Reddit Post'; btn.disabled = false;
+}
+
+async function doQuora() {
+    var topic = document.getElementById('quoraTopic').value.trim();
+    if (!topic) { showToast('Enter a question', 'error'); return; }
+    var btn = document.getElementById('quoraGenBtn');
+    btn.textContent = 'Generating...'; btn.disabled = true;
+    try {
+        var data = await apiCall('/api/blog/generate-quora', 'POST', { topic: topic });
+        if (data.success) {
+            newArticleId = data.article.id;
+            lastGenType = 'quora';
+            showPreview(data.article.question || '', 'Quora Answer', data.article.answer || '', '');
+            showToast('Answer ready! Copy and paste to Quora.', 'success');
+        } else { showToast(data.error || 'Failed', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    btn.textContent = '❓ Generate Answer'; btn.disabled = false;
+}
+
+async function pubNew(platform) {
+    if (!newArticleId) { showToast('Generate an article first', 'error'); return; }
+    await quickPub(newArticleId, platform, false);
+}
+
+async function quickPub(id, platform, alreadyPublished) {
+    if (alreadyPublished) {
+        if (!confirm('Already published to ' + platform + '. Publish again? This creates a duplicate.')) return;
+    }
+    showToast('Publishing to ' + platform + '...', 'success');
+    try {
+        var data = await apiCall('/api/blog/publish/' + id, 'POST', { platform: platform });
+        if (data.success) {
+            if (data.import_url) { showToast('Opening Medium import...', 'success'); window.open(data.import_url, '_blank'); }
+            else { showToast('Published to ' + platform + '!', 'success'); }
+            setTimeout(function() { location.reload(); }, 1500);
+        } else { showToast(data.error || 'Failed', 'error'); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function addTopic() {
+    var title = document.getElementById('newTopicTitle').value.trim();
+    if (!title) { showToast('Enter a title', 'error'); return; }
+    var data = await apiCall('/api/blog/topics', 'POST', {
+        title: title,
+        category: document.getElementById('newTopicCategory').value,
+        keywords: document.getElementById('newTopicKeywords').value
+    });
+    if (data.success) { showToast('Added!', 'success'); location.reload(); }
+    else { showToast(data.error || 'Failed', 'error'); }
+}
+</script>
+{% endblock %}
