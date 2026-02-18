@@ -69,13 +69,13 @@
     </div>
 
     <div class="card" style="margin-bottom: 16px;">
-        <h3 style="margin-bottom: 12px; font-size: 1.05rem; color: var(--gold);">Quick Prompts</h3>
+        <h3 style="margin-bottom: 12px; font-size: 1.05rem; color: var(--gold);">Quick Scenes</h3>
         <div id="promptTemplates" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
     </div>
 
     <div class="card" style="margin-bottom: 16px;">
-        <h3 style="margin-bottom: 12px; font-size: 1.05rem; color: var(--gold);">Prompt</h3>
-        <textarea id="imagePrompt" class="form-control" rows="4" placeholder="Describe the image you want to generate..."></textarea>
+        <h3 style="margin-bottom: 12px; font-size: 1.05rem; color: var(--gold);">Describe the Scene</h3>
+        <textarea id="imagePrompt" class="form-control" rows="4" placeholder="Describe the background scene (your real bottle will be placed on it)..."></textarea>
         <div style="display: flex; gap: 8px; margin-top: 12px;">
             <select id="imageSize" class="form-control" style="flex: 1;">
                 <option value="1024x1024">Square 1:1</option>
@@ -87,18 +87,38 @@
                 <option value="high" selected>High</option>
             </select>
         </div>
-        <div style="margin-top: 10px; padding: 10px; background: rgba(200,164,94,0.08); border-radius: 6px; border: 1px solid var(--border);">
+        <div style="margin-top: 10px; padding: 12px; background: rgba(200,164,94,0.08); border-radius: 6px; border: 1px solid var(--border);">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="useBottleRef" checked style="width: 18px; height: 18px; accent-color: var(--gold);">
-                <span style="font-size: 0.95rem; color: var(--gold); font-weight: 600;">📸 Use Real Bottle Photo (Recommended)</span>
+                <span style="font-size: 0.95rem; color: var(--gold); font-weight: 600;">📸 Composite Mode — Real Bottle (Recommended)</span>
             </label>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">When checked, your actual Forbidden Bourbon bottle photo is sent to gpt-image-1 so it generates scenes with YOUR EXACT bottle — not a random AI-invented one. Unchecked uses text-only description.</p>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">AI generates ONLY the background scene, then your REAL bottle photo is composited on top. This guarantees your exact bottle — correct label, proof, shape, everything.</p>
+            
+            <div id="compositeControls" style="display: flex; gap: 8px; margin-top: 10px;">
+                <div style="flex: 1;">
+                    <label style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; display: block;">Position</label>
+                    <select id="bottlePosition" class="form-control" style="font-size: 0.9rem;">
+                        <option value="center" selected>Center</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; display: block;">Bottle Size</label>
+                    <select id="bottleScale" class="form-control" style="font-size: 0.9rem;">
+                        <option value="0.40">Small</option>
+                        <option value="0.55" selected>Medium</option>
+                        <option value="0.70">Large</option>
+                        <option value="0.85">Extra Large</option>
+                    </select>
+                </div>
+            </div>
         </div>
         <button id="generateImageBtn" class="btn btn-primary" style="width: 100%; margin-top: 12px;" onclick="generateImage()">
             ✦ Generate Image
         </button>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; text-align: center;">
-            Powered by gpt-image-1 — sends your real bottle photo to generate on-brand images with your EXACT Forbidden Bourbon bottle.
+            Composite mode: AI creates the scene → your real bottle is placed on top. 100% accurate bottle every time.
         </p>
     </div>
 
@@ -236,52 +256,52 @@
 
     const IMAGE_PROMPTS = {
         product: [
-            "Bottle hero shot, dramatic side lighting",
-            "Bottle on marble surface, golden hour light",
-            "Two bottles — Small Batch & Single Barrel",
-            "Close-up of label detail, art deco design",
-            "Backlit bottle showing amber liquid glow",
-            "Bottle with wax seal detail, macro shot",
+            "Dark marble surface, dramatic side lighting, smoky atmosphere",
+            "Polished oak bar top, warm amber spotlights, blurred bar background",
+            "Black slate surface with scattered ice crystals, rim lighting",
+            "Aged leather desk, brass lamp, old books, warm library glow",
+            "Raw wooden barrel top, dark moody warehouse background",
+            "Clean white marble pedestal, studio lighting, luxury feel",
         ],
         lifestyle: [
-            "Bottle on a leather-top bar, warm ambient glow",
-            "Hand holding a glass, fireplace background",
-            "Outdoor porch at sunset with bourbon glass",
-            "Bottle on a rustic wooden table, candlelight",
-            "Gentleman's study with bourbon and cigar",
-            "Date night table setting with bourbon pours",
+            "Cozy fireside setting, warm orange glow, leather armchair visible",
+            "Outdoor porch at golden hour sunset, Kentucky rolling hills",
+            "Upscale restaurant table, candlelight, bokeh city lights behind",
+            "Rustic cabin interior, stone fireplace, wool blanket draped nearby",
+            "Gentleman's study with globe, dark wood shelving, warm lamplight",
+            "Summer evening patio, string lights, warm breeze atmosphere",
         ],
         artdeco: [
-            "Art deco poster style, gold and black geometric",
-            "1920s speakeasy advertisement aesthetic",
-            "Gold foil on black, geometric bourbon ad",
-            "Gatsby-era cocktail party illustration",
-            "Ornate gold frame around bottle, art deco border",
-            "Prohibition-era rebel theme, bold typography",
+            "Art deco geometric gold and black background, 1920s pattern",
+            "Speakeasy interior, velvet curtains, brass fixtures, moody lighting",
+            "Gold leaf textured wall, dramatic spotlight from above",
+            "Gatsby-era black marble with gold geometric inlays",
+            "Ornate gold frame on dark wall, gallery spotlight",
+            "Black lacquer surface with gold flake accents, luxury aesthetic",
         ],
         cocktail: [
-            "Old Fashioned with orange peel garnish",
-            "Whiskey Sour with egg white foam and cherry",
-            "Manhattan in a coupe glass, cherry garnish",
-            "Gold Rush cocktail with honey and lemon",
-            "Bourbon Lemonade on a summer patio",
-            "Mint Julep in a silver cup, fresh mint",
+            "Bar setup with Old Fashioned ingredients: orange peel, cherry, bitters",
+            "Cocktail prep station: muddler, jigger, ice sphere, crystal glass",
+            "Mint Julep scene: crushed ice, silver cup, fresh mint sprigs",
+            "Whiskey Sour setup: lemon, egg white, cherry, shaker",
+            "Summer bar scene: ice bucket, citrus slices, copper tools",
+            "Cheese and charcuterie board, walnut cutting board, warm lighting",
         ],
         social: [
-            "Instagram story — 'What's in your glass tonight?'",
-            "Quote card — 'Rebellion in every bottle'",
-            "Flat lay — bottle, glass, citrus, ice",
-            "Weekend vibes — bottle by the pool",
-            "Gift guide — bottle with bow in gift box",
-            "Bourbon & cheese pairing spread",
+            "Instagram-worthy flat lay: leather, watch, cigar, glasses",
+            "Gift box scene: velvet lined box, ribbon, holiday setting",
+            "Poolside luxury: marble edge, blue water, tropical plants",
+            "Weekend brunch table, newspaper, coffee, warm morning light",
+            "Party scene: confetti, gold accents, celebration mood",
+            "Campfire glow, night sky, rustic outdoor setting",
         ],
         editorial: [
-            "Magazine cover style portrait, dramatic lighting",
-            "Kentucky bourbon country, rolling hills, barrel house",
-            "Close-up macro of bourbon in glass, bokeh",
-            "Barrel aging warehouse, rows of oak barrels",
-            "Grain field at golden hour, wheat and corn",
-            "Behind the scenes — hand-blending process",
+            "Magazine-style dark gradient backdrop, professional studio lighting",
+            "Kentucky bourbon country landscape, rolling hills, golden hour",
+            "Barrel aging warehouse, rows of oak barrels, shaft of light",
+            "Close-up textured background: charred oak, grain detail",
+            "Copper still room, industrial distillery equipment, steam",
+            "Wheat field at golden hour, Kentucky countryside",
         ]
     };
 
@@ -322,6 +342,14 @@
         loadVideoPromptTemplates();
         checkApiKeys();
         loadGallery();
+        // Toggle composite controls visibility
+        var refCheckbox = document.getElementById('useBottleRef');
+        var compositeControls = document.getElementById('compositeControls');
+        if (refCheckbox && compositeControls) {
+            refCheckbox.addEventListener('change', function() {
+                compositeControls.style.display = this.checked ? 'flex' : 'none';
+            });
+        }
     });
     
     // Also run on SPA navigation (DOMContentLoaded won't fire)
@@ -405,25 +433,33 @@
         var size = document.getElementById('imageSize').value;
         var quality = document.getElementById('imageQuality').value;
         var useRef = document.getElementById('useBottleRef').checked;
+        var bottlePosition = document.getElementById('bottlePosition') ? document.getElementById('bottlePosition').value : 'center';
+        var bottleScale = document.getElementById('bottleScale') ? document.getElementById('bottleScale').value : '0.55';
+        
         document.getElementById('imageResult').classList.remove('hidden');
         document.getElementById('imageLoading').classList.remove('hidden');
         document.getElementById('imageOutput').classList.add('hidden');
         document.getElementById('generateImageBtn').disabled = true;
-        document.getElementById('generateImageBtn').textContent = 'Generating...';
+        document.getElementById('generateImageBtn').textContent = useRef ? 'Generating scene + compositing...' : 'Generating...';
 
-        var fullPrompt;
-        if (useRef) {
-            // Reference image mode: gpt-image-1 sees the real bottle photo
-            fullPrompt = "This is the Forbidden Bourbon bottle — an 8-pointed star geometric decanter with angular faceted glass, dark metallic label reading 'FORBIDDEN' in gold art deco lettering, with a heavy square stopper top. " + prompt + ". Use this EXACT bottle in the generated image. Professional product photography, luxury spirits brand, dark moody background with warm golden accents.";
-        } else {
-            // Text-only mode: detailed description
-            fullPrompt = BRAND_DETAIL + prompt + ". Professional product photography, luxury spirits brand aesthetic, dark moody background with warm golden accents. The bottle must be the distinctive 8-pointed star geometric decanter shape with angular faceted glass.";
+        // In composite mode, send the scene description as-is (backend handles everything)
+        // In text-only mode, add brand context
+        var fullPrompt = prompt;
+        if (!useRef) {
+            fullPrompt = BRAND_DETAIL + prompt + ". Professional product photography, luxury spirits brand aesthetic.";
         }
 
         fetch('/api/ai/generate-image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: fullPrompt, size: size, quality: quality, use_reference: useRef })
+            body: JSON.stringify({ 
+                prompt: fullPrompt, 
+                size: size, 
+                quality: quality, 
+                use_reference: useRef,
+                bottle_position: bottlePosition,
+                bottle_scale: parseFloat(bottleScale)
+            })
         }).then(safeJSON).then(function(data) {
             document.getElementById('imageLoading').classList.add('hidden');
             document.getElementById('generateImageBtn').disabled = false;
