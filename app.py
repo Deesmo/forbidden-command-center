@@ -984,7 +984,7 @@ def api_generate_image():
                 
                 # Step 1: Get/create bottle cutout (cached per bottle type)
                 cutout_suffix = 'sb' if bottle_type == 'small_batch' else 'sgl'
-                cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}-v4.png')
+                cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}-v5.png')
                 
                 if not os.path.exists(cutout_path):
                     # Source photos per bottle type
@@ -1008,21 +1008,24 @@ def api_generate_image():
                     else:
                         print(f"[AI Studio] Creating {bottle_type} cutout from {source_path}")
                         img = PILImage.open(source_path).convert('RGBA')
+                        # Resize to max 1200px tall to reduce memory
+                        if img.height > 1200:
+                            ratio = 1200 / img.height
+                            img = img.resize((int(img.width * ratio), 1200), PILImage.LANCZOS)
                         
-                        # Enhanced threshold background removal
                         data_arr = np.array(img)
                         r, g, b = data_arr[:,:,0].astype(float), data_arr[:,:,1].astype(float), data_arr[:,:,2].astype(float)
                         
-                        # Sample actual background color from corners for better matching
+                        # Sample background color from corners (just 5px strips)
                         h, w = data_arr.shape[:2]
-                        corners = []
-                        for cy, cx in [(0,0), (0,w-1), (h-1,0), (h-1,w-1)]:
-                            for dy in range(min(20, h)):
-                                for dx in range(min(20, w)):
-                                    py, px = min(cy+dy, h-1), min(cx+dx if cx==0 else cx-dx, w-1)
-                                    corners.append(data_arr[py, px, :3].astype(float))
-                        corners = np.array(corners)
-                        bg_r, bg_g, bg_b = np.median(corners[:,0]), np.median(corners[:,1]), np.median(corners[:,2])
+                        s = 5  # sample strip size
+                        corner_pixels = np.concatenate([
+                            data_arr[:s, :s, :3].reshape(-1, 3),
+                            data_arr[:s, -s:, :3].reshape(-1, 3),
+                            data_arr[-s:, :s, :3].reshape(-1, 3),
+                            data_arr[-s:, -s:, :3].reshape(-1, 3),
+                        ]).astype(float)
+                        bg_r, bg_g, bg_b = np.median(corner_pixels[:,0]), np.median(corner_pixels[:,1]), np.median(corner_pixels[:,2])
                         
                         # Distance from background color (better than pure brightness)
                         dist = np.sqrt((r - bg_r)**2 + (g - bg_g)**2 + (b - bg_b)**2)
@@ -1117,37 +1120,31 @@ def api_generate_image():
                             y = bg_img.height - target_h - int(bg_img.height * 0.04)
                             
                             # --- COLOR TEMPERATURE MATCHING ---
-                            # Sample the scene colors in the area where bottle will sit
+                            # Sample scene colors where bottle will sit
                             sample_region = bg_img.crop((
                                 max(0, x - 20), max(0, y + target_h // 2),
                                 min(bg_img.width, x + target_w + 20), min(bg_img.height, y + target_h + 20)
-                            ))
+                            )).resize((20, 20), PILImage.LANCZOS)  # Small sample
                             scene_arr = np.array(sample_region.convert('RGB'))
-                            if scene_arr.size > 0:
-                                avg_r = np.mean(scene_arr[:,:,0])
-                                avg_g = np.mean(scene_arr[:,:,1])
-                                avg_b = np.mean(scene_arr[:,:,2])
-                                scene_brightness = (avg_r + avg_g + avg_b) / 3.0
-                                
-                                # Apply subtle color tint to bottle to match scene warmth
-                                bottle_arr = np.array(bottle).astype(float)
-                                alpha_mask = bottle_arr[:,:,3] > 0
-                                
-                                # Warm/cool shift (subtle - 5% blend with scene color)
-                                tint_strength = 0.06
-                                bottle_arr[alpha_mask, 0] = bottle_arr[alpha_mask, 0] * (1 - tint_strength) + avg_r * tint_strength
-                                bottle_arr[alpha_mask, 1] = bottle_arr[alpha_mask, 1] * (1 - tint_strength) + avg_g * tint_strength
-                                bottle_arr[alpha_mask, 2] = bottle_arr[alpha_mask, 2] * (1 - tint_strength) + avg_b * tint_strength
-                                
-                                # Brightness matching (subtle - match scene exposure)
-                                bottle_rgb = bottle_arr[alpha_mask, :3]
-                                bottle_brightness = np.mean(bottle_rgb)
-                                if bottle_brightness > 0:
-                                    brightness_ratio = min(1.3, max(0.7, (scene_brightness * 0.3 + bottle_brightness * 0.7) / bottle_brightness))
-                                    bottle_arr[alpha_mask, :3] *= brightness_ratio
-                                
-                                bottle_arr = np.clip(bottle_arr, 0, 255).astype(np.uint8)
-                                bottle = PILImage.fromarray(bottle_arr)
+                            avg_r, avg_g, avg_b = np.mean(scene_arr[:,:,0]), np.mean(scene_arr[:,:,1]), np.mean(scene_arr[:,:,2])
+                            scene_brightness = (avg_r + avg_g + avg_b) / 3.0
+                            
+                            # Subtle tint to match scene warmth (6% blend)
+                            bottle_arr = np.array(bottle).astype(np.float32)
+                            alpha_mask = bottle_arr[:,:,3] > 0
+                            t = 0.06
+                            bottle_arr[alpha_mask, 0] = bottle_arr[alpha_mask, 0] * (1 - t) + avg_r * t
+                            bottle_arr[alpha_mask, 1] = bottle_arr[alpha_mask, 1] * (1 - t) + avg_g * t
+                            bottle_arr[alpha_mask, 2] = bottle_arr[alpha_mask, 2] * (1 - t) + avg_b * t
+                            
+                            # Brightness match
+                            bottle_brightness = np.mean(bottle_arr[alpha_mask, :3])
+                            if bottle_brightness > 0:
+                                br = min(1.3, max(0.7, (scene_brightness * 0.3 + bottle_brightness * 0.7) / bottle_brightness))
+                                bottle_arr[alpha_mask, :3] *= br
+                            
+                            bottle = PILImage.fromarray(np.clip(bottle_arr, 0, 255).astype(np.uint8))
+                            del bottle_arr, alpha_mask  # Free memory
                             
                             # --- SOFT CONTACT SHADOW ---
                             shadow_layer = PILImage.new('RGBA', bg_img.size, (0, 0, 0, 0))
