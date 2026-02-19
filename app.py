@@ -975,14 +975,13 @@ def api_generate_image():
         errors = []
         
         # =====================================================
-        # COMPOSITE MODE: Original photo + mask
-        # Send the real studio photo, mask protects the bottle,
-        # AI replaces the light background with a new scene.
-        # No cutout step — bottle pixels are untouched originals.
+        # COMPOSITE MODE: Responses API with high fidelity
+        # Send original photo via conversational API, AI edits
+        # background while preserving bottle with high fidelity.
         # =====================================================
         if use_reference:
             try:
-                from PIL import Image as PILImage, ImageFilter
+                from PIL import Image as PILImage
                 import numpy as np
                 import io
                 
@@ -1006,7 +1005,7 @@ def api_generate_image():
                 if not source_path:
                     errors.append(f"No studio photo found for {bottle_type}")
                 else:
-                    # ---- STEP 2: PLACE ORIGINAL PHOTO ON CANVAS ----
+                    # ---- STEP 2: PREPARE IMAGE FOR API ----
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1536'
                     canvas_w, canvas_h = [int(d) for d in gpt_size.split('x')]
                     
@@ -1030,146 +1029,110 @@ def api_generate_image():
                         x = (canvas_w - target_w) // 2
                     y = canvas_h - target_h - int(canvas_h * 0.06)
                     
-                    # Place original photo on neutral dark canvas
-                    image_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (30, 30, 30, 255))
+                    # Place original photo on neutral canvas
+                    # Use medium gray so the AI knows this is a "background to replace"
+                    image_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (180, 180, 180, 255))
                     image_canvas.paste(original, (x, y), original)
                     
-                    # ---- STEP 3: BUILD MASK FROM ORIGINAL PHOTO ----
-                    # Detect light background in original → transparent in mask (AI fills)
-                    # Detect bottle (dark/colored) → opaque in mask (protected)
-                    orig_arr = np.array(original)
-                    r = orig_arr[:,:,0].astype(float)
-                    g = orig_arr[:,:,1].astype(float)
-                    b = orig_arr[:,:,2].astype(float)
-                    
-                    # Sample corners of original photo to get background color
-                    h, w = orig_arr.shape[:2]
-                    s = 8
-                    corner_pixels = np.concatenate([
-                        orig_arr[:s, :s, :3].reshape(-1, 3),
-                        orig_arr[:s, -s:, :3].reshape(-1, 3),
-                        orig_arr[-s:, :s, :3].reshape(-1, 3),
-                        orig_arr[-s:, -s:, :3].reshape(-1, 3),
-                    ]).astype(float)
-                    bg_r = np.median(corner_pixels[:,0])
-                    bg_g = np.median(corner_pixels[:,1])
-                    bg_b = np.median(corner_pixels[:,2])
-                    
-                    # Color distance from background
-                    dist = np.sqrt((r - bg_r)**2 + (g - bg_g)**2 + (b - bg_b)**2)
-                    
-                    # Bottle mask: far from bg = bottle (protect), close to bg = background (replace)
-                    # OpenAI mask: opaque = protected, transparent = edit
-                    mask_arr = np.zeros((h, w, 4), dtype=np.uint8)
-                    
-                    # Solid bottle pixels (far from background color)
-                    bottle_pixels = dist > 50
-                    mask_arr[bottle_pixels] = [255, 255, 255, 255]  # Opaque = protected
-                    
-                    # Transition zone - partially protected
-                    transition = (dist > 30) & (dist <= 50)
-                    transition_alpha = ((dist[transition] - 30) / 20.0 * 255).astype(np.uint8)
-                    mask_arr[transition, 0] = 255
-                    mask_arr[transition, 1] = 255
-                    mask_arr[transition, 2] = 255
-                    mask_arr[transition, 3] = transition_alpha
-                    
-                    # Close to background = transparent (AI generates here)
-                    # Already 0,0,0,0 by default
-                    
-                    bottle_mask_img = PILImage.fromarray(mask_arr)
-                    
-                    # Slight dilation to protect edge pixels better
-                    mask_alpha = bottle_mask_img.split()[3]
-                    mask_alpha = mask_alpha.filter(ImageFilter.MaxFilter(5))  # Expand protected area slightly
-                    mask_alpha = mask_alpha.filter(ImageFilter.GaussianBlur(radius=2))  # Smooth edges
-                    bottle_mask_img = PILImage.merge('RGBA', (
-                        PILImage.new('L', bottle_mask_img.size, 255),
-                        PILImage.new('L', bottle_mask_img.size, 255),
-                        PILImage.new('L', bottle_mask_img.size, 255),
-                        mask_alpha
-                    ))
-                    
-                    # Place bottle mask onto full canvas mask
-                    # Canvas background area = all transparent (AI generates)
-                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
-                    mask_canvas.paste(bottle_mask_img, (x, y), bottle_mask_img)
-                    
-                    del orig_arr, mask_arr
-                    
-                    # Save to buffers
-                    image_buffer = io.BytesIO()
-                    image_canvas.save(image_buffer, format='PNG')
-                    image_buffer.seek(0)
-                    
-                    mask_buffer = io.BytesIO()
-                    mask_canvas.save(mask_buffer, format='PNG')
-                    mask_buffer.seek(0)
+                    # Convert to base64 for Responses API
+                    img_buffer = io.BytesIO()
+                    image_canvas.convert('RGB').save(img_buffer, format='PNG')
+                    img_buffer.seek(0)
+                    img_b64 = b64.b64encode(img_buffer.read()).decode('utf-8')
+                    data_url = f"data:image/png;base64,{img_b64}"
                     
                     print(f"[AI Studio] Canvas: {canvas_w}x{canvas_h}, photo at ({x},{y}) size {target_w}x{target_h}")
-                    print(f"[AI Studio] Background color detected: ({bg_r:.0f},{bg_g:.0f},{bg_b:.0f})")
                     
-                    # ---- STEP 4: SEND TO EDIT ENDPOINT WITH MASK ----
+                    # ---- STEP 3: CALL RESPONSES API ----
                     edit_prompt = (
                         f"Professional product photography: {prompt}. "
-                        "Replace ONLY the background around this bourbon bottle with a new scene. "
-                        "Create a photorealistic surface and environment. "
-                        "Add natural lighting that interacts with the glass bottle — "
-                        "subtle caustic light effects, specular highlights, "
-                        "warm reflections on the surface beneath. "
-                        "Create a realistic shadow where the bottle sits. "
+                        "This image shows a bourbon bottle on a plain gray background. "
+                        "Replace ONLY the gray background with a new photorealistic scene. "
+                        "Create a beautiful surface, environment, and lighting around the bottle. "
+                        "Add natural lighting interactions — caustic light through glass, "
+                        "specular highlights, warm reflections on the surface, realistic contact shadow. "
                         "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
-                        "CRITICAL: Preserve the bottle's geometry, labels, text, and legibility exactly. "
-                        "Do NOT modify, restyle, or alter the bottle in any way. "
-                        "Change only the background — keep everything about the bottle the same."
+                        "CRITICAL CONSTRAINT: Preserve the bottle's geometry, labels, text, logo, "
+                        "liquid color, cap, and every visual detail EXACTLY as shown. "
+                        "Do NOT modify, restyle, redraw, or alter the bottle in any way. "
+                        "Change ONLY the background — keep the bottle pixel-perfect."
                     )
                     
-                    print(f"[AI Studio] Sending original photo + mask to edit endpoint...")
+                    print(f"[AI Studio] Sending to Responses API with high fidelity edit...")
                     resp = req.post(
-                        'https://api.openai.com/v1/images/edits',
-                        headers={'Authorization': f'Bearer {api_key}'},
-                        files={
-                            'image': ('image.png', image_buffer, 'image/png'),
-                            'mask': ('mask.png', mask_buffer, 'image/png'),
+                        'https://api.openai.com/v1/responses',
+                        headers={
+                            'Authorization': f'Bearer {api_key}',
+                            'Content-Type': 'application/json',
                         },
-                        data={
-                            'model': 'gpt-image-1.5',
-                            'prompt': edit_prompt,
-                            'size': gpt_size,
-                            'quality': quality if quality in ('low', 'medium', 'high') else 'high',
-                            'input_fidelity': 'high',
+                        json={
+                            'model': 'gpt-4.1',
+                            'input': [
+                                {
+                                    'role': 'user',
+                                    'content': [
+                                        {
+                                            'type': 'input_text',
+                                            'text': edit_prompt,
+                                        },
+                                        {
+                                            'type': 'input_image',
+                                            'image_url': data_url,
+                                        },
+                                    ],
+                                },
+                            ],
+                            'tools': [
+                                {
+                                    'type': 'image_generation',
+                                    'input_fidelity': 'high',
+                                    'action': 'edit',
+                                    'quality': quality if quality in ('low', 'medium', 'high') else 'high',
+                                    'size': gpt_size,
+                                },
+                            ],
                         },
-                        timeout=120
+                        timeout=180
                     )
                     
                     if resp.status_code == 200:
                         result = resp.json()
-                        img_data_resp = result['data'][0]
-                        final = None
+                        # Extract image from Responses API output
+                        image_b64 = None
+                        for output_item in result.get('output', []):
+                            if output_item.get('type') == 'image_generation_call':
+                                image_b64 = output_item.get('result')
+                                break
                         
-                        if img_data_resp.get('b64_json'):
-                            final_bytes = b64.b64decode(img_data_resp['b64_json'])
+                        if image_b64:
+                            final_bytes = b64.b64decode(image_b64)
                             final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                        elif img_data_resp.get('url'):
-                            final_dl = req.get(img_data_resp['url'], timeout=30)
-                            final = PILImage.open(io.BytesIO(final_dl.content)).convert('RGB')
-                        
-                        if final:
+                            
                             filename = f"ai-composite-{int(time_module.time())}.png"
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
                             image_url = f"/static/uploads/{filename}"
-                            model_used = f'photo-mask-1.5-hifi ({bottle_type})'
+                            model_used = f'responses-api-hifi ({bottle_type})'
                             revised_prompt = edit_prompt
-                            print(f"[AI Studio] Photo mask composite saved: {filepath}")
+                            print(f"[AI Studio] Responses API composite saved: {filepath}")
+                        else:
+                            # Check if there's text output explaining why
+                            text_output = ''
+                            for output_item in result.get('output', []):
+                                if output_item.get('type') == 'message':
+                                    for content in output_item.get('content', []):
+                                        if content.get('type') == 'output_text':
+                                            text_output += content.get('text', '')
+                            errors.append(f"No image in response. Output: {text_output[:300]}")
+                            print(f"[AI Studio] No image in Responses API output: {text_output[:300]}")
                     else:
                         err_msg = 'Unknown error'
                         try:
-                            err_msg = resp.json().get('error', {}).get('message', resp.text[:300])
+                            err_msg = resp.json().get('error', {}).get('message', resp.text[:500])
                         except:
-                            err_msg = resp.text[:300]
-                        errors.append(f"Edit endpoint: {err_msg}")
-                        print(f"[AI Studio] Edit endpoint failed ({resp.status_code}): {err_msg}")
+                            err_msg = resp.text[:500]
+                        errors.append(f"Responses API: {err_msg}")
+                        print(f"[AI Studio] Responses API failed ({resp.status_code}): {err_msg}")
                         
             except ImportError as ie:
                 errors.append(f"Pillow/numpy not installed: {str(ie)}")
