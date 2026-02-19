@@ -1112,14 +1112,16 @@ def api_generate_image():
                     # ---- STEP 4: SEND TO EDIT ENDPOINT WITH MASK ----
                     edit_prompt = (
                         f"Professional product photography: {prompt}. "
-                        "Replace the background around this bourbon bottle with a new scene. "
+                        "Replace ONLY the background around this bourbon bottle with a new scene. "
                         "Create a photorealistic surface and environment. "
                         "Add natural lighting that interacts with the glass bottle — "
                         "subtle caustic light effects, specular highlights, "
                         "warm reflections on the surface beneath. "
                         "Create a realistic shadow where the bottle sits. "
                         "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
-                        "Keep the bottle exactly as it appears — do not modify it in any way."
+                        "CRITICAL: Preserve the bottle's geometry, labels, text, and legibility exactly. "
+                        "Do NOT modify, restyle, or alter the bottle in any way. "
+                        "Change only the background — keep everything about the bottle the same."
                     )
                     
                     print(f"[AI Studio] Sending original photo + mask to edit endpoint...")
@@ -1131,10 +1133,11 @@ def api_generate_image():
                             'mask': ('mask.png', mask_buffer, 'image/png'),
                         },
                         data={
-                            'model': 'gpt-image-1',
+                            'model': 'gpt-image-1.5',
                             'prompt': edit_prompt,
                             'size': gpt_size,
                             'quality': quality if quality in ('low', 'medium', 'high') else 'high',
+                            'input_fidelity': 'high',
                         },
                         timeout=120
                     )
@@ -1156,7 +1159,7 @@ def api_generate_image():
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
                             image_url = f"/static/uploads/{filename}"
-                            model_used = f'photo-mask-composite ({bottle_type})'
+                            model_used = f'photo-mask-1.5-hifi ({bottle_type})'
                             revised_prompt = edit_prompt
                             print(f"[AI Studio] Photo mask composite saved: {filepath}")
                     else:
