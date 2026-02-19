@@ -1087,25 +1087,24 @@ def api_generate_image():
                             '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
                             'Black/dark label with barrel emblem badge. '
                         )
-                    
                     edit_prompt = (
-                        f"Professional product photography edit: {prompt}. "
-                        "Image 1 shows a bourbon bottle on a plain gray background. "
+                        "Change ONLY the plain gray background in Image 1. "
+                        "Keep everything else EXACTLY the same — "
+                        "the bottle, its shape, glass facets, liquid color, cap, neck band, "
+                        "label, text, logo, typography, and every visual detail must remain identical. "
+                        "Do NOT modify, restyle, or redraw the bottle in any way. "
+                        "\n\n"
+                        f"Replace the gray background with: {prompt}. "
+                        "Shot with a 50mm lens, shallow depth of field, soft directional lighting. "
+                        "Add realistic contact shadow beneath the bottle, natural caustic light "
+                        "through the glass, and subtle warm reflections on the surface. "
+                        "Luxury spirits advertisement aesthetic. "
+                        "\n\n"
                         "Image 2 is a close-up of the bottle's label for reference. "
-                        "TASK: Replace ONLY the gray background with a new photorealistic scene. "
-                        "Create a beautiful surface, environment, and lighting around the bottle. "
-                        "Add natural lighting interactions — caustic light through glass, "
-                        "specular highlights, warm reflections on the surface, realistic contact shadow. "
-                        "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
                         f"{label_text_desc}"
-                        "CRITICAL CONSTRAINTS: "
-                        "1. Preserve the bottle's geometry, shape, faceted glass panels EXACTLY. "
-                        "2. Preserve ALL label text, logo, typography, and brand elements EXACTLY as shown. "
-                        "3. Preserve liquid color, cap, neck band, and every visual detail. "
-                        "4. Do NOT modify, restyle, redraw, or alter the bottle in any way. "
-                        "5. Change ONLY the background — keep the bottle pixel-perfect. "
-                        "6. The bottle from Image 1 must appear identical in the output."
+                        "Preserve this label text EXACTLY as shown — do not alter any characters."
                     )
+                      
                     
                     # ---- STEP 4: TRY IMAGE EDIT API (gpt-image-1.5) ----
                     print(f"[AI Studio] Sending to Image Edit API with gpt-image-1.5 + input_fidelity=high...")
