@@ -975,8 +975,10 @@ def api_generate_image():
         errors = []
         
         # =====================================================
-        # COMPOSITE MODE: Mask-based AI scene generation
-        # Bottle pixels are protected by mask, AI fills the rest
+        # COMPOSITE MODE: Original photo + mask
+        # Send the real studio photo, mask protects the bottle,
+        # AI replaces the light background with a new scene.
+        # No cutout step — bottle pixels are untouched originals.
         # =====================================================
         if use_reference:
             try:
@@ -984,90 +986,41 @@ def api_generate_image():
                 import numpy as np
                 import io
                 
-                # ---- STEP 1: GET BOTTLE CUTOUT ----
-                cutout_suffix = 'sb' if bottle_type == 'small_batch' else 'sgl'
-                pro_cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}-pro.png')
-                fallback_cutout_path = os.path.join(app.static_folder, 'photos', f'bottle-cutout-{cutout_suffix}-v5.png')
-                
-                cutout_path = None
-                if os.path.exists(pro_cutout_path):
-                    cutout_path = pro_cutout_path
-                    print(f"[AI Studio] Using pro cutout: {pro_cutout_path}")
-                elif os.path.exists(fallback_cutout_path):
-                    cutout_path = fallback_cutout_path
-                    print(f"[AI Studio] Using cached cutout: {fallback_cutout_path}")
+                # ---- STEP 1: GET ORIGINAL STUDIO PHOTO ----
+                if bottle_type == 'single_barrel':
+                    source_candidates = [
+                        os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
+                        os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_58_LightBG_V1.png'),
+                    ]
                 else:
-                    # Create fallback cutout at runtime
-                    if bottle_type == 'single_barrel':
-                        source_candidates = [
-                            os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
-                            os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_58_LightBG_V1.png'),
-                        ]
-                    else:
-                        source_candidates = [
-                            os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
-                        ]
-                    
-                    source_path = None
-                    for c in source_candidates:
-                        if os.path.exists(c):
-                            source_path = c
-                            break
-                    
-                    if source_path:
-                        print(f"[AI Studio] Creating runtime cutout from {source_path}")
-                        img = PILImage.open(source_path).convert('RGBA')
-                        if img.height > 1200:
-                            ratio = 1200 / img.height
-                            img = img.resize((int(img.width * ratio), 1200), PILImage.LANCZOS)
-                        
-                        data_arr = np.array(img)
-                        r, g, b = data_arr[:,:,0].astype(float), data_arr[:,:,1].astype(float), data_arr[:,:,2].astype(float)
-                        h, w = data_arr.shape[:2]
-                        s = 5
-                        corner_pixels = np.concatenate([
-                            data_arr[:s, :s, :3].reshape(-1, 3),
-                            data_arr[:s, -s:, :3].reshape(-1, 3),
-                            data_arr[-s:, :s, :3].reshape(-1, 3),
-                            data_arr[-s:, -s:, :3].reshape(-1, 3),
-                        ]).astype(float)
-                        bg_r, bg_g, bg_b = np.median(corner_pixels[:,0]), np.median(corner_pixels[:,1]), np.median(corner_pixels[:,2])
-                        dist = np.sqrt((r - bg_r)**2 + (g - bg_g)**2 + (b - bg_b)**2)
-                        alpha = np.ones(dist.shape, dtype=np.float32) * 255
-                        alpha[dist < 25] = 0
-                        edge_zone = (dist >= 25) & (dist < 60)
-                        alpha[edge_zone] = 255 * ((dist[edge_zone] - 25) / 35.0)
-                        data_arr[:,:,3] = np.clip(alpha, 0, 255).astype(np.uint8)
-                        cutout_img = PILImage.fromarray(data_arr)
-                        bbox = cutout_img.getbbox()
-                        if bbox:
-                            cutout_img = cutout_img.crop(bbox)
-                        r_ch, g_ch, b_ch, a_ch = cutout_img.split()
-                        a_img = a_ch.filter(ImageFilter.MinFilter(3))
-                        a_img = a_img.filter(ImageFilter.GaussianBlur(radius=1.5))
-                        cutout_img = PILImage.merge('RGBA', (r_ch, g_ch, b_ch, a_img))
-                        cutout_img.save(fallback_cutout_path)
-                        cutout_path = fallback_cutout_path
-                        del data_arr, alpha
-                        print(f"[AI Studio] Runtime cutout saved: {cutout_path}")
-                    else:
-                        errors.append(f"No source photo found for {bottle_type}")
+                    source_candidates = [
+                        os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
+                    ]
                 
-                if cutout_path:
-                    # ---- STEP 2: BUILD IMAGE + MASK ----
+                source_path = None
+                for c in source_candidates:
+                    if os.path.exists(c):
+                        source_path = c
+                        break
+                
+                if not source_path:
+                    errors.append(f"No studio photo found for {bottle_type}")
+                else:
+                    # ---- STEP 2: PLACE ORIGINAL PHOTO ON CANVAS ----
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1536'
                     canvas_w, canvas_h = [int(d) for d in gpt_size.split('x')]
                     
-                    bottle = PILImage.open(cutout_path).convert('RGBA')
+                    original = PILImage.open(source_path).convert('RGBA')
+                    print(f"[AI Studio] Original photo: {original.size} from {source_path}")
                     
-                    # Scale bottle
+                    # Scale bottle to desired size on canvas
                     scale_factor = max(0.3, min(0.85, float(bottle_scale or 0.65)))
                     target_h = int(canvas_h * scale_factor)
-                    aspect = bottle.width / bottle.height
+                    aspect = original.width / original.height
                     target_w = int(target_h * aspect)
-                    bottle = bottle.resize((target_w, target_h), PILImage.LANCZOS)
+                    original = original.resize((target_w, target_h), PILImage.LANCZOS)
                     
-                    # Position on canvas
+                    # Position
                     pos = bottle_position or 'center'
                     if pos == 'left':
                         x = int(canvas_w * 0.15)
@@ -1077,47 +1030,99 @@ def api_generate_image():
                         x = (canvas_w - target_w) // 2
                     y = canvas_h - target_h - int(canvas_h * 0.06)
                     
-                    # IMAGE: Real bottle on neutral dark background
-                    # Dark gray gives AI context about the mood
+                    # Place original photo on neutral dark canvas
                     image_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (30, 30, 30, 255))
-                    image_canvas.paste(bottle, (x, y), bottle)
+                    image_canvas.paste(original, (x, y), original)
                     
+                    # ---- STEP 3: BUILD MASK FROM ORIGINAL PHOTO ----
+                    # Detect light background in original → transparent in mask (AI fills)
+                    # Detect bottle (dark/colored) → opaque in mask (protected)
+                    orig_arr = np.array(original)
+                    r = orig_arr[:,:,0].astype(float)
+                    g = orig_arr[:,:,1].astype(float)
+                    b = orig_arr[:,:,2].astype(float)
+                    
+                    # Sample corners of original photo to get background color
+                    h, w = orig_arr.shape[:2]
+                    s = 8
+                    corner_pixels = np.concatenate([
+                        orig_arr[:s, :s, :3].reshape(-1, 3),
+                        orig_arr[:s, -s:, :3].reshape(-1, 3),
+                        orig_arr[-s:, :s, :3].reshape(-1, 3),
+                        orig_arr[-s:, -s:, :3].reshape(-1, 3),
+                    ]).astype(float)
+                    bg_r = np.median(corner_pixels[:,0])
+                    bg_g = np.median(corner_pixels[:,1])
+                    bg_b = np.median(corner_pixels[:,2])
+                    
+                    # Color distance from background
+                    dist = np.sqrt((r - bg_r)**2 + (g - bg_g)**2 + (b - bg_b)**2)
+                    
+                    # Bottle mask: far from bg = bottle (protect), close to bg = background (replace)
+                    # OpenAI mask: opaque = protected, transparent = edit
+                    mask_arr = np.zeros((h, w, 4), dtype=np.uint8)
+                    
+                    # Solid bottle pixels (far from background color)
+                    bottle_pixels = dist > 50
+                    mask_arr[bottle_pixels] = [255, 255, 255, 255]  # Opaque = protected
+                    
+                    # Transition zone - partially protected
+                    transition = (dist > 30) & (dist <= 50)
+                    transition_alpha = ((dist[transition] - 30) / 20.0 * 255).astype(np.uint8)
+                    mask_arr[transition, 0] = 255
+                    mask_arr[transition, 1] = 255
+                    mask_arr[transition, 2] = 255
+                    mask_arr[transition, 3] = transition_alpha
+                    
+                    # Close to background = transparent (AI generates here)
+                    # Already 0,0,0,0 by default
+                    
+                    bottle_mask_img = PILImage.fromarray(mask_arr)
+                    
+                    # Slight dilation to protect edge pixels better
+                    mask_alpha = bottle_mask_img.split()[3]
+                    mask_alpha = mask_alpha.filter(ImageFilter.MaxFilter(5))  # Expand protected area slightly
+                    mask_alpha = mask_alpha.filter(ImageFilter.GaussianBlur(radius=2))  # Smooth edges
+                    bottle_mask_img = PILImage.merge('RGBA', (
+                        PILImage.new('L', bottle_mask_img.size, 255),
+                        PILImage.new('L', bottle_mask_img.size, 255),
+                        PILImage.new('L', bottle_mask_img.size, 255),
+                        mask_alpha
+                    ))
+                    
+                    # Place bottle mask onto full canvas mask
+                    # Canvas background area = all transparent (AI generates)
+                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
+                    mask_canvas.paste(bottle_mask_img, (x, y), bottle_mask_img)
+                    
+                    del orig_arr, mask_arr
+                    
+                    # Save to buffers
                     image_buffer = io.BytesIO()
                     image_canvas.save(image_buffer, format='PNG')
                     image_buffer.seek(0)
-                    
-                    # MASK: Transparent where AI should generate, opaque where bottle is protected
-                    # OpenAI: transparent areas in mask = where to edit
-                    # So: bottle area = OPAQUE (protected), everything else = TRANSPARENT (generate)
-                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))  # All transparent = all editable
-                    
-                    # Build bottle mask from alpha channel using numpy (fast)
-                    bottle_arr = np.array(bottle)
-                    mask_arr = np.zeros((bottle.height, bottle.width, 4), dtype=np.uint8)
-                    solid = bottle_arr[:,:,3] > 128  # Solid bottle pixels
-                    mask_arr[solid] = [255, 255, 255, 255]  # Opaque = protected
-                    bottle_mask = PILImage.fromarray(mask_arr)
-                    
-                    mask_canvas.paste(bottle_mask, (x, y), bottle_mask)
                     
                     mask_buffer = io.BytesIO()
                     mask_canvas.save(mask_buffer, format='PNG')
                     mask_buffer.seek(0)
                     
-                    print(f"[AI Studio] Image + Mask: {canvas_w}x{canvas_h}, bottle at ({x},{y}) size {target_w}x{target_h}")
+                    print(f"[AI Studio] Canvas: {canvas_w}x{canvas_h}, photo at ({x},{y}) size {target_w}x{target_h}")
+                    print(f"[AI Studio] Background color detected: ({bg_r:.0f},{bg_g:.0f},{bg_b:.0f})")
                     
-                    # ---- STEP 3: SEND TO EDIT ENDPOINT WITH MASK ----
+                    # ---- STEP 4: SEND TO EDIT ENDPOINT WITH MASK ----
                     edit_prompt = (
                         f"Professional product photography: {prompt}. "
-                        "Create a photorealistic background scene around this bourbon bottle. "
-                        "The bottle is already placed — generate the surface, background, and environment. "
-                        "Add natural lighting effects: shadows where the bottle meets the surface, "
-                        "warm reflections on the surface beneath, atmospheric depth and mood. "
+                        "Replace the background around this bourbon bottle with a new scene. "
+                        "Create a photorealistic surface and environment. "
+                        "Add natural lighting that interacts with the glass bottle — "
+                        "subtle caustic light effects, specular highlights, "
+                        "warm reflections on the surface beneath. "
+                        "Create a realistic shadow where the bottle sits. "
                         "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
-                        "Make the scene look natural as if the bottle was photographed in this setting."
+                        "Keep the bottle exactly as it appears — do not modify it in any way."
                     )
                     
-                    print(f"[AI Studio] Sending to edit endpoint with mask...")
+                    print(f"[AI Studio] Sending original photo + mask to edit endpoint...")
                     resp = req.post(
                         'https://api.openai.com/v1/images/edits',
                         headers={'Authorization': f'Bearer {api_key}'},
@@ -1151,9 +1156,9 @@ def api_generate_image():
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
                             image_url = f"/static/uploads/{filename}"
-                            model_used = f'mask-composite ({bottle_type})'
+                            model_used = f'photo-mask-composite ({bottle_type})'
                             revised_prompt = edit_prompt
-                            print(f"[AI Studio] Mask composite saved: {filepath}")
+                            print(f"[AI Studio] Photo mask composite saved: {filepath}")
                     else:
                         err_msg = 'Unknown error'
                         try:
