@@ -975,9 +975,10 @@ def api_generate_image():
         errors = []
         
         # =====================================================
-        # COMPOSITE MODE: Responses API with high fidelity
-        # Send original photo via conversational API, AI edits
-        # background while preserving bottle with high fidelity.
+        # COMPOSITE MODE: Image Edit API with gpt-image-1.5
+        # Uses high input fidelity + multi-image (bottle + label crop)
+        # for maximum label/logo preservation. Falls back to
+        # Responses API if Edit API fails.
         # =====================================================
         if use_reference:
             try:
@@ -1005,7 +1006,7 @@ def api_generate_image():
                 if not source_path:
                     errors.append(f"No studio photo found for {bottle_type}")
                 else:
-                    # ---- STEP 2: PREPARE IMAGE FOR API ----
+                    # ---- STEP 2: PREPARE IMAGES FOR API ----
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1536'
                     canvas_w, canvas_h = [int(d) for d in gpt_size.split('x')]
                     
@@ -1017,7 +1018,7 @@ def api_generate_image():
                     target_h = int(canvas_h * scale_factor)
                     aspect = original.width / original.height
                     target_w = int(target_h * aspect)
-                    original = original.resize((target_w, target_h), PILImage.LANCZOS)
+                    bottle_resized = original.resize((target_w, target_h), PILImage.LANCZOS)
                     
                     # Position
                     pos = bottle_position or 'center'
@@ -1029,110 +1030,222 @@ def api_generate_image():
                         x = (canvas_w - target_w) // 2
                     y = canvas_h - target_h - int(canvas_h * 0.06)
                     
-                    # Place original photo on neutral canvas
-                    # Use medium gray so the AI knows this is a "background to replace"
+                    # IMAGE 1: Bottle on neutral gray canvas (primary — gets best fidelity)
                     image_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (180, 180, 180, 255))
-                    image_canvas.paste(original, (x, y), original)
+                    image_canvas.paste(bottle_resized, (x, y), bottle_resized)
                     
-                    # Convert to base64 for Responses API
-                    img_buffer = io.BytesIO()
-                    image_canvas.convert('RGB').save(img_buffer, format='PNG')
-                    img_buffer.seek(0)
-                    img_b64 = b64.b64encode(img_buffer.read()).decode('utf-8')
-                    data_url = f"data:image/png;base64,{img_b64}"
+                    img1_buffer = io.BytesIO()
+                    image_canvas.convert('RGB').save(img1_buffer, format='PNG', optimize=False)
+                    img1_buffer.seek(0)
+                    img1_bytes = img1_buffer.read()
                     
-                    print(f"[AI Studio] Canvas: {canvas_w}x{canvas_h}, photo at ({x},{y}) size {target_w}x{target_h}")
+                    # IMAGE 2: Cropped label close-up (sends more detail to AI)
+                    # Crop center 50% of bottle height where the label lives
+                    label_top = int(original.height * 0.25)
+                    label_bottom = int(original.height * 0.75)
+                    label_crop = original.crop((0, label_top, original.width, label_bottom))
+                    # Resize label crop to fill a square for maximum pixel detail
+                    label_size = min(1024, max(label_crop.width, label_crop.height))
+                    label_aspect = label_crop.width / label_crop.height
+                    if label_aspect > 1:
+                        lw, lh = label_size, int(label_size / label_aspect)
+                    else:
+                        lw, lh = int(label_size * label_aspect), label_size
+                    label_crop = label_crop.resize((lw, lh), PILImage.LANCZOS)
+                    # Place on white canvas
+                    label_canvas = PILImage.new('RGBA', (1024, 1024), (255, 255, 255, 255))
+                    lx = (1024 - lw) // 2
+                    ly = (1024 - lh) // 2
+                    label_canvas.paste(label_crop, (lx, ly), label_crop)
                     
-                    # ---- STEP 3: CALL RESPONSES API ----
+                    img2_buffer = io.BytesIO()
+                    label_canvas.convert('RGB').save(img2_buffer, format='PNG', optimize=False)
+                    img2_buffer.seek(0)
+                    img2_bytes = img2_buffer.read()
+                    
+                    print(f"[AI Studio] Canvas: {canvas_w}x{canvas_h}, bottle at ({x},{y}) size {target_w}x{target_h}")
+                    print(f"[AI Studio] Label crop: {lw}x{lh} on 1024x1024 canvas")
+                    
+                    # ---- STEP 3: BUILD PROMPT WITH EXACT LABEL TEXT ----
+                    # Spelling out brand text letter-by-letter per gpt-image-1.5 prompting guide
+                    if bottle_type == 'single_barrel':
+                        label_text_desc = (
+                            'The label text reads exactly (preserve verbatim): '
+                            '"BOLD & ELEGANT" in small text at top of label, '
+                            '"F-O-R-B-I-D-D-E-N" as the large main brand name in ornate gold serif letters, '
+                            '"SINGLE BARREL" below the brand name, '
+                            '"STRAIGHT BOURBON WHISKEY" in gold capitals, '
+                            '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
+                            'Gold/copper label with barrel emblem badge. '
+                        )
+                    else:
+                        label_text_desc = (
+                            'The label text reads exactly (preserve verbatim): '
+                            '"BOLD & ELEGANT" in small text at top of label, '
+                            '"F-O-R-B-I-D-D-E-N" as the large main brand name in ornate silver/white serif letters, '
+                            '"STRAIGHT BOURBON WHISKEY" in silver capitals below, '
+                            '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
+                            'Black/dark label with barrel emblem badge. '
+                        )
+                    
                     edit_prompt = (
-                        f"Professional product photography: {prompt}. "
-                        "This image shows a bourbon bottle on a plain gray background. "
-                        "Replace ONLY the gray background with a new photorealistic scene. "
+                        f"Professional product photography edit: {prompt}. "
+                        "Image 1 shows a bourbon bottle on a plain gray background. "
+                        "Image 2 is a close-up of the bottle's label for reference. "
+                        "TASK: Replace ONLY the gray background with a new photorealistic scene. "
                         "Create a beautiful surface, environment, and lighting around the bottle. "
                         "Add natural lighting interactions — caustic light through glass, "
                         "specular highlights, warm reflections on the surface, realistic contact shadow. "
                         "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
-                        "CRITICAL CONSTRAINT: Preserve the bottle's geometry, labels, text, logo, "
-                        "liquid color, cap, and every visual detail EXACTLY as shown. "
-                        "Do NOT modify, restyle, redraw, or alter the bottle in any way. "
-                        "Change ONLY the background — keep the bottle pixel-perfect."
+                        f"{label_text_desc}"
+                        "CRITICAL CONSTRAINTS: "
+                        "1. Preserve the bottle's geometry, shape, faceted glass panels EXACTLY. "
+                        "2. Preserve ALL label text, logo, typography, and brand elements EXACTLY as shown. "
+                        "3. Preserve liquid color, cap, neck band, and every visual detail. "
+                        "4. Do NOT modify, restyle, redraw, or alter the bottle in any way. "
+                        "5. Change ONLY the background — keep the bottle pixel-perfect. "
+                        "6. The bottle from Image 1 must appear identical in the output."
                     )
                     
-                    print(f"[AI Studio] Sending to Responses API with high fidelity edit...")
+                    # ---- STEP 4: TRY IMAGE EDIT API (gpt-image-1.5) ----
+                    print(f"[AI Studio] Sending to Image Edit API with gpt-image-1.5 + input_fidelity=high...")
+                    
+                    edit_files = [
+                        ('image[]', ('bottle_scene.png', img1_bytes, 'image/png')),
+                        ('image[]', ('label_detail.png', img2_bytes, 'image/png')),
+                    ]
+                    edit_data = {
+                        'model': 'gpt-image-1.5',
+                        'prompt': edit_prompt,
+                        'quality': quality if quality in ('low', 'medium', 'high') else 'high',
+                        'size': gpt_size,
+                        'input_fidelity': 'high',
+                        'output_format': 'png',
+                    }
+                    
                     resp = req.post(
-                        'https://api.openai.com/v1/responses',
-                        headers={
-                            'Authorization': f'Bearer {api_key}',
-                            'Content-Type': 'application/json',
-                        },
-                        json={
-                            'model': 'gpt-4.1',
-                            'input': [
-                                {
-                                    'role': 'user',
-                                    'content': [
-                                        {
-                                            'type': 'input_text',
-                                            'text': edit_prompt,
-                                        },
-                                        {
-                                            'type': 'input_image',
-                                            'image_url': data_url,
-                                        },
-                                    ],
-                                },
-                            ],
-                            'tools': [
-                                {
-                                    'type': 'image_generation',
-                                    'input_fidelity': 'high',
-                                    'action': 'edit',
-                                    'quality': quality if quality in ('low', 'medium', 'high') else 'high',
-                                    'size': gpt_size,
-                                },
-                            ],
-                        },
+                        'https://api.openai.com/v1/images/edits',
+                        headers={'Authorization': f'Bearer {api_key}'},
+                        files=edit_files,
+                        data=edit_data,
                         timeout=180
                     )
                     
                     if resp.status_code == 200:
                         result = resp.json()
-                        # Extract image from Responses API output
-                        image_b64 = None
-                        for output_item in result.get('output', []):
-                            if output_item.get('type') == 'image_generation_call':
-                                image_b64 = output_item.get('result')
-                                break
-                        
-                        if image_b64:
-                            final_bytes = b64.b64decode(image_b64)
+                        img_b64 = result.get('data', [{}])[0].get('b64_json')
+                        if img_b64:
+                            final_bytes = b64.b64decode(img_b64)
                             final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
                             
                             filename = f"ai-composite-{int(time_module.time())}.png"
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
                             image_url = f"/static/uploads/{filename}"
-                            model_used = f'responses-api-hifi ({bottle_type})'
+                            model_used = f'gpt-image-1.5-edit-hifi ({bottle_type})'
                             revised_prompt = edit_prompt
-                            print(f"[AI Studio] Responses API composite saved: {filepath}")
+                            print(f"[AI Studio] Image Edit API composite saved: {filepath}")
                         else:
-                            # Check if there's text output explaining why
-                            text_output = ''
-                            for output_item in result.get('output', []):
-                                if output_item.get('type') == 'message':
-                                    for content in output_item.get('content', []):
-                                        if content.get('type') == 'output_text':
-                                            text_output += content.get('text', '')
-                            errors.append(f"No image in response. Output: {text_output[:300]}")
-                            print(f"[AI Studio] No image in Responses API output: {text_output[:300]}")
+                            errors.append("Image Edit API returned no image data")
+                            print(f"[AI Studio] Image Edit API: no b64_json in response")
                     else:
                         err_msg = 'Unknown error'
                         try:
                             err_msg = resp.json().get('error', {}).get('message', resp.text[:500])
                         except:
                             err_msg = resp.text[:500]
-                        errors.append(f"Responses API: {err_msg}")
-                        print(f"[AI Studio] Responses API failed ({resp.status_code}): {err_msg}")
+                        errors.append(f"Image Edit API: {err_msg}")
+                        print(f"[AI Studio] Image Edit API failed ({resp.status_code}): {err_msg}")
+                    
+                    # ---- STEP 5: FALLBACK TO RESPONSES API IF EDIT API FAILED ----
+                    if not image_url:
+                        print(f"[AI Studio] Falling back to Responses API...")
+                        
+                        # Re-encode image 1 as base64 for Responses API (JSON format)
+                        img1_buffer.seek(0)
+                        img_b64_str = b64.b64encode(img1_bytes).decode('utf-8')
+                        data_url = f"data:image/png;base64,{img_b64_str}"
+                        
+                        fallback_prompt = (
+                            f"Professional product photography: {prompt}. "
+                            "This image shows a bourbon bottle on a plain gray background. "
+                            "Replace ONLY the gray background with a new photorealistic scene. "
+                            "Create a beautiful surface, environment, and lighting around the bottle. "
+                            "Add natural lighting interactions — caustic light through glass, "
+                            "specular highlights, warm reflections on the surface, realistic contact shadow. "
+                            "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
+                            f"{label_text_desc}"
+                            "CRITICAL CONSTRAINT: Preserve the bottle's geometry, labels, text, logo, "
+                            "liquid color, cap, and every visual detail EXACTLY as shown. "
+                            "Do NOT modify, restyle, redraw, or alter the bottle in any way. "
+                            "Change ONLY the background — keep the bottle pixel-perfect."
+                        )
+                        
+                        resp2 = req.post(
+                            'https://api.openai.com/v1/responses',
+                            headers={
+                                'Authorization': f'Bearer {api_key}',
+                                'Content-Type': 'application/json',
+                            },
+                            json={
+                                'model': 'gpt-4.1',
+                                'input': [
+                                    {
+                                        'role': 'user',
+                                        'content': [
+                                            {'type': 'input_text', 'text': fallback_prompt},
+                                            {'type': 'input_image', 'image_url': data_url},
+                                        ],
+                                    },
+                                ],
+                                'tools': [
+                                    {
+                                        'type': 'image_generation',
+                                        'input_fidelity': 'high',
+                                        'action': 'edit',
+                                        'quality': quality if quality in ('low', 'medium', 'high') else 'high',
+                                        'size': gpt_size,
+                                    },
+                                ],
+                            },
+                            timeout=180
+                        )
+                        
+                        if resp2.status_code == 200:
+                            result2 = resp2.json()
+                            image_b64 = None
+                            for output_item in result2.get('output', []):
+                                if output_item.get('type') == 'image_generation_call':
+                                    image_b64 = output_item.get('result')
+                                    break
+                            
+                            if image_b64:
+                                final_bytes = b64.b64decode(image_b64)
+                                final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
+                                
+                                filename = f"ai-composite-{int(time_module.time())}.png"
+                                filepath = os.path.join(app.static_folder, 'uploads', filename)
+                                final.save(filepath, quality=95)
+                                image_url = f"/static/uploads/{filename}"
+                                model_used = f'responses-api-hifi-fallback ({bottle_type})'
+                                revised_prompt = fallback_prompt
+                                print(f"[AI Studio] Responses API fallback saved: {filepath}")
+                            else:
+                                text_output = ''
+                                for output_item in result2.get('output', []):
+                                    if output_item.get('type') == 'message':
+                                        for content in output_item.get('content', []):
+                                            if content.get('type') == 'output_text':
+                                                text_output += content.get('text', '')
+                                errors.append(f"Responses API fallback: no image. {text_output[:300]}")
+                        else:
+                            err_msg2 = 'Unknown error'
+                            try:
+                                err_msg2 = resp2.json().get('error', {}).get('message', resp2.text[:500])
+                            except:
+                                err_msg2 = resp2.text[:500]
+                            errors.append(f"Responses API fallback: {err_msg2}")
+                            print(f"[AI Studio] Responses API fallback failed ({resp2.status_code}): {err_msg2}")
                         
             except ImportError as ie:
                 errors.append(f"Pillow/numpy not installed: {str(ie)}")
@@ -1140,7 +1253,6 @@ def api_generate_image():
             except Exception as e:
                 import traceback
                 errors.append(f"Composite: {str(e)[:200]}")
-                print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
                 print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
         # =====================================================
         # FALLBACK: Text-only generation (no reference)
@@ -1165,7 +1277,7 @@ def api_generate_image():
                     'https://api.openai.com/v1/images/generations',
                     headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
                     json={
-                        'model': 'gpt-image-1',
+                        'model': 'gpt-image-1.5',
                         'prompt': text_prompt,
                         'n': 1,
                         'size': gpt_size,
@@ -1187,16 +1299,16 @@ def api_generate_image():
                     elif img_data_resp.get('url'):
                         image_url = img_data_resp['url']
                     revised_prompt = img_data_resp.get('revised_prompt', prompt)
-                    model_used = 'gpt-image-1 (text-only, bottle approximate)'
+                    model_used = 'gpt-image-1.5 (text-only, bottle approximate)'
                 else:
                     err_msg = 'Unknown error'
                     try:
                         err_msg = resp.json().get('error', {}).get('message', resp.text[:300])
                     except:
                         err_msg = resp.text[:300]
-                    errors.append(f"gpt-image-1 gen: {err_msg}")
+                    errors.append(f"gpt-image-1.5 gen: {err_msg}")
             except Exception as e:
-                errors.append(f"gpt-image-1 gen: {str(e)[:200]}")
+                errors.append(f"gpt-image-1.5 gen: {str(e)[:200]}")
         
         # =====================================================
         # DALL-E 3 last resort fallback
