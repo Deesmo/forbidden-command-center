@@ -121,16 +121,11 @@
                 </div>
             </div>
         </div>
-        <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px;">
-            <input type="checkbox" id="aiRefine" style="width: 18px; height: 18px; accent-color: var(--gold);">
-            <label for="aiRefine" style="font-size: 0.9rem; color: var(--gold); cursor: pointer;">✨ AI Refinement Pass</label>
-            <span style="font-size: 0.78rem; color: var(--text-muted);">— AI harmonizes lighting & blending (uses 2nd API call)</span>
-        </div>
         <button id="generateImageBtn" class="btn btn-primary" style="width: 100%; margin-top: 12px;" onclick="generateImage()">
             ✦ Generate Image
         </button>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; text-align: center;">
-            Composite mode: AI creates the scene → your real bottle is placed on top. 100% accurate bottle every time.
+            Composite mode: AI builds the scene around your real bottle — natural lighting, shadows, and reflections.
         </p>
     </div>
 
@@ -453,13 +448,12 @@
         var bottlePosition = document.getElementById('bottlePosition') ? document.getElementById('bottlePosition').value : 'center';
         var bottleScale = document.getElementById('bottleScale') ? document.getElementById('bottleScale').value : '0.65';
         var bottleType = document.getElementById('bottleType') ? document.getElementById('bottleType').value : 'small_batch';
-        var aiRefine = document.getElementById('aiRefine') ? document.getElementById('aiRefine').checked : false;
         
         document.getElementById('imageResult').classList.remove('hidden');
         document.getElementById('imageLoading').classList.remove('hidden');
         document.getElementById('imageOutput').classList.add('hidden');
         document.getElementById('generateImageBtn').disabled = true;
-        document.getElementById('generateImageBtn').textContent = useRef ? (aiRefine ? 'Generating + refining...' : 'Generating scene + compositing...') : 'Generating...';
+        document.getElementById('generateImageBtn').textContent = useRef ? 'Building scene around bottle...' : 'Generating...';
 
         // In composite mode, send the scene description as-is (backend handles everything)
         // In text-only mode, add brand context
@@ -478,8 +472,7 @@
                 use_reference: useRef,
                 bottle_position: bottlePosition,
                 bottle_scale: parseFloat(bottleScale),
-                bottle_type: bottleType,
-                ai_refine: aiRefine
+                bottle_type: bottleType
             })
         }).then(safeJSON).then(function(data) {
             document.getElementById('imageLoading').classList.add('hidden');
