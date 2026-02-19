@@ -975,8 +975,8 @@ def api_generate_image():
         errors = []
         
         # =====================================================
-        # COMPOSITE MODE: AI builds scene around bottle shape,
-        # then real bottle replaces AI's approximation
+        # COMPOSITE MODE: Mask-based AI scene generation
+        # Bottle pixels are protected by mask, AI fills the rest
         # =====================================================
         if use_reference:
             try:
@@ -1054,7 +1054,7 @@ def api_generate_image():
                         errors.append(f"No source photo found for {bottle_type}")
                 
                 if cutout_path:
-                    # ---- STEP 2: CREATE CANVAS WITH BOTTLE FOR AI ----
+                    # ---- STEP 2: BUILD IMAGE + MASK ----
                     gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1536'
                     canvas_w, canvas_h = [int(d) for d in gpt_size.split('x')]
                     
@@ -1077,35 +1077,53 @@ def api_generate_image():
                         x = (canvas_w - target_w) // 2
                     y = canvas_h - target_h - int(canvas_h * 0.06)
                     
-                    # Create canvas with bottle for AI to build scene around
-                    canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
-                    canvas.paste(bottle, (x, y), bottle)
+                    # IMAGE: Real bottle on neutral dark background
+                    # Dark gray gives AI context about the mood
+                    image_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (30, 30, 30, 255))
+                    image_canvas.paste(bottle, (x, y), bottle)
                     
-                    canvas_buffer = io.BytesIO()
-                    canvas.save(canvas_buffer, format='PNG')
-                    canvas_buffer.seek(0)
+                    image_buffer = io.BytesIO()
+                    image_canvas.save(image_buffer, format='PNG')
+                    image_buffer.seek(0)
                     
-                    print(f"[AI Studio] Canvas: {canvas_w}x{canvas_h}, bottle at ({x},{y}) size {target_w}x{target_h}")
+                    # MASK: Transparent where AI should generate, opaque where bottle is protected
+                    # OpenAI: transparent areas in mask = where to edit
+                    # So: bottle area = OPAQUE (protected), everything else = TRANSPARENT (generate)
+                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))  # All transparent = all editable
                     
-                    # ---- STEP 3: AI GENERATES FULL SCENE ----
-                    # AI sees bottle shape and builds environment around it
+                    # Build bottle mask from alpha channel using numpy (fast)
+                    bottle_arr = np.array(bottle)
+                    mask_arr = np.zeros((bottle.height, bottle.width, 4), dtype=np.uint8)
+                    solid = bottle_arr[:,:,3] > 128  # Solid bottle pixels
+                    mask_arr[solid] = [255, 255, 255, 255]  # Opaque = protected
+                    bottle_mask = PILImage.fromarray(mask_arr)
+                    
+                    mask_canvas.paste(bottle_mask, (x, y), bottle_mask)
+                    
+                    mask_buffer = io.BytesIO()
+                    mask_canvas.save(mask_buffer, format='PNG')
+                    mask_buffer.seek(0)
+                    
+                    print(f"[AI Studio] Image + Mask: {canvas_w}x{canvas_h}, bottle at ({x},{y}) size {target_w}x{target_h}")
+                    
+                    # ---- STEP 3: SEND TO EDIT ENDPOINT WITH MASK ----
                     edit_prompt = (
                         f"Professional product photography: {prompt}. "
-                        "Create a complete photorealistic scene around this bourbon bottle. "
-                        "Build the background, surface, lighting, and environment. "
-                        "Add natural lighting that interacts with the glass — caustic light effects, "
-                        "specular highlights, warm reflections on the surface beneath. "
-                        "Create a realistic shadow where the bottle sits on the surface. "
-                        "The scene should have depth, atmosphere, and cinematic quality. "
-                        "High-end spirits advertisement, luxury aesthetic."
+                        "Create a photorealistic background scene around this bourbon bottle. "
+                        "The bottle is already placed — generate the surface, background, and environment. "
+                        "Add natural lighting effects: shadows where the bottle meets the surface, "
+                        "warm reflections on the surface beneath, atmospheric depth and mood. "
+                        "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
+                        "Make the scene look natural as if the bottle was photographed in this setting."
                     )
                     
-                    print(f"[AI Studio] Sending to edit endpoint for scene generation...")
+                    print(f"[AI Studio] Sending to edit endpoint with mask...")
                     resp = req.post(
                         'https://api.openai.com/v1/images/edits',
                         headers={'Authorization': f'Bearer {api_key}'},
                         files={
-                            'image': ('bottle_canvas.png', canvas_buffer, 'image/png'),
+                            'image': ('image.png', image_buffer, 'image/png'),
+                            'mask': ('mask.png', mask_buffer, 'image/png'),
                         },
                         data={
                             'model': 'gpt-image-1',
@@ -1119,67 +1137,23 @@ def api_generate_image():
                     if resp.status_code == 200:
                         result = resp.json()
                         img_data_resp = result['data'][0]
-                        ai_scene = None
+                        final = None
                         
                         if img_data_resp.get('b64_json'):
-                            scene_bytes = b64.b64decode(img_data_resp['b64_json'])
-                            ai_scene = PILImage.open(io.BytesIO(scene_bytes)).convert('RGBA')
+                            final_bytes = b64.b64decode(img_data_resp['b64_json'])
+                            final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
                         elif img_data_resp.get('url'):
-                            scene_dl = req.get(img_data_resp['url'], timeout=30)
-                            ai_scene = PILImage.open(io.BytesIO(scene_dl.content)).convert('RGBA')
+                            final_dl = req.get(img_data_resp['url'], timeout=30)
+                            final = PILImage.open(io.BytesIO(final_dl.content)).convert('RGB')
                         
-                        if ai_scene:
-                            # ---- STEP 4: REPLACE AI BOTTLE WITH REAL BOTTLE ----
-                            # The AI built lighting/shadows/reflections for a bottle
-                            # in this exact position. Now swap in the real one.
-                            
-                            # Subtle color temperature match — sample the scene around the bottle
-                            sample_left = max(0, x - 30)
-                            sample_right = min(canvas_w, x + target_w + 30)
-                            sample_top = max(0, y + int(target_h * 0.4))
-                            sample_bottom = min(canvas_h, y + target_h + 30)
-                            sample_region = ai_scene.crop((sample_left, sample_top, sample_right, sample_bottom))
-                            sample_region = sample_region.resize((20, 20), PILImage.LANCZOS)
-                            scene_arr = np.array(sample_region.convert('RGB'))
-                            avg_r = np.mean(scene_arr[:,:,0])
-                            avg_g = np.mean(scene_arr[:,:,1])
-                            avg_b = np.mean(scene_arr[:,:,2])
-                            scene_brightness = (avg_r + avg_g + avg_b) / 3.0
-                            
-                            # Apply subtle tint to match scene warmth
-                            bottle_arr = np.array(bottle).astype(np.float32)
-                            alpha_mask = bottle_arr[:,:,3] > 0
-                            t = 0.06
-                            bottle_arr[alpha_mask, 0] = bottle_arr[alpha_mask, 0] * (1 - t) + avg_r * t
-                            bottle_arr[alpha_mask, 1] = bottle_arr[alpha_mask, 1] * (1 - t) + avg_g * t
-                            bottle_arr[alpha_mask, 2] = bottle_arr[alpha_mask, 2] * (1 - t) + avg_b * t
-                            
-                            # Brightness match
-                            bottle_brightness = np.mean(bottle_arr[alpha_mask, :3])
-                            if bottle_brightness > 0:
-                                br = min(1.25, max(0.75, (scene_brightness * 0.35 + bottle_brightness * 0.65) / bottle_brightness))
-                                bottle_arr[alpha_mask, :3] *= br
-                            
-                            matched_bottle = PILImage.fromarray(np.clip(bottle_arr, 0, 255).astype(np.uint8))
-                            del bottle_arr, alpha_mask
-                            
-                            # Composite: AI scene + real bottle on top
-                            # The AI's bottle gets covered by the real one
-                            final_composite = ai_scene.copy()
-                            bottle_layer = PILImage.new('RGBA', final_composite.size, (0, 0, 0, 0))
-                            bottle_layer.paste(matched_bottle, (x, y), matched_bottle)
-                            final_composite = PILImage.alpha_composite(final_composite, bottle_layer)
-                            
-                            final = final_composite.convert('RGB')
-                            
-                            # Save
+                        if final:
                             filename = f"ai-composite-{int(time_module.time())}.png"
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
                             image_url = f"/static/uploads/{filename}"
-                            model_used = f'hybrid-composite ({bottle_type})'
+                            model_used = f'mask-composite ({bottle_type})'
                             revised_prompt = edit_prompt
-                            print(f"[AI Studio] Hybrid composite saved: {filepath}")
+                            print(f"[AI Studio] Mask composite saved: {filepath}")
                     else:
                         err_msg = 'Unknown error'
                         try:
@@ -1195,6 +1169,7 @@ def api_generate_image():
             except Exception as e:
                 import traceback
                 errors.append(f"Composite: {str(e)[:200]}")
+                print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
                 print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
         # =====================================================
         # FALLBACK: Text-only generation (no reference)
