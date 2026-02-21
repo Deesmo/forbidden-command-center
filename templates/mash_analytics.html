@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Mash Analytics{% endblock %}
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
     .mash-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:20px; }
     .mash-header h2 { margin:0; color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:1.5rem; }
@@ -14,6 +15,10 @@
     .milestone { background:linear-gradient(135deg, rgba(212,175,55,0.15), rgba(212,175,55,0.05)); border:1px solid var(--gold); border-radius:12px; padding:20px; text-align:center; margin-bottom:20px; }
     .milestone .big { color:var(--gold); font-size:2.4rem; font-weight:700; font-family:'Cormorant Garamond',serif; }
     .milestone .sub { color:var(--text-muted); font-size:0.9rem; margin-top:4px; }
+    .charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+    .chart-card { background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px; }
+    .chart-card h3 { color:var(--gold); font-family:'Cormorant Garamond',serif; margin:0 0 10px 0; font-size:1.1rem; }
+    @media (max-width:768px) { .charts-grid { grid-template-columns:1fr; } }
 </style>
 
 <div class="mash-header">
@@ -32,23 +37,55 @@
     <div class="mash-stat"><div class="val">$194</div><div class="lbl">Avg Order</div></div>
 </div>
 
-<div class="mash-card">
-    <h3>📈 Sales Overview</h3>
-    <p>Data sourced from 41 distiller reports and Mash Networks e-commerce portal. To update these numbers, screenshot the latest tabs from your Mash Networks dashboard (Demographics, Geography, Customer, Products, Marketing, Baskets) and upload them here or in a new chat for integration.</p>
+<div class="charts-grid">
+    <div class="chart-card"><h3>📈 Monthly Sales</h3><canvas id="salesChart"></canvas></div>
+    <div class="chart-card"><h3>📊 Monthly Orders</h3><canvas id="ordersChart"></canvas></div>
+    <div class="chart-card"><h3>🥃 Product Mix</h3><canvas id="productChart"></canvas></div>
+    <div class="chart-card"><h3>🗺️ Top States</h3><canvas id="statesChart"></canvas></div>
 </div>
 
 <div class="mash-card">
-    <h3>📋 Data Tabs</h3>
-    <p>🏪 <strong>Sales Overview</strong> — Revenue, orders, bottles by month</p>
-    <p>👥 <strong>Customer Demographics</strong> — Age, gender, new vs returning</p>
-    <p>🗺️ <strong>Geography</strong> — Sales by state and city</p>
-    <p>📦 <strong>Products</strong> — Small Batch vs Single Barrel performance</p>
-    <p>📣 <strong>Marketing</strong> — Traffic sources, referrals, campaign ROI</p>
-    <p>🛒 <strong>Baskets</strong> — Cart size, add-ons, bundles</p>
+    <h3>💡 Update Data</h3>
+    <p>These charts use sample data approximating your totals. Screenshot each tab from your <a href="https://mashnetworks.com" target="_blank" style="color:var(--gold);">Mash Networks portal</a> (Demographics, Geography, Customer, Products, Marketing, Baskets) and upload to update with real numbers.</p>
 </div>
 
-<div class="mash-card">
-    <h3>💡 Next Steps</h3>
-    <p>Screenshot each tab from your <a href="https://mashnetworks.com" target="_blank" style="color:var(--gold);">Mash Networks portal</a> and upload to update the dashboard with live data visualizations.</p>
-</div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var gold='#d4af37', goldA='rgba(212,175,55,0.6)', grid='rgba(255,255,255,0.1)';
+    Chart.defaults.color='#ccc'; Chart.defaults.borderColor=grid;
+
+    new Chart(document.getElementById('salesChart'), {
+        type:'bar',
+        data:{labels:['Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May'],
+            datasets:[{label:'Revenue ($)',data:[8200,9800,11500,12300,14800,18200,21500,13400,10200,11800,9600,5303],
+                backgroundColor:goldA,borderColor:gold,borderWidth:1,borderRadius:4}]},
+        options:{responsive:true,plugins:{legend:{display:false}},
+            scales:{y:{beginAtZero:true,ticks:{callback:function(v){return '$'+(v/1000).toFixed(0)+'K'}}}}}
+    });
+
+    new Chart(document.getElementById('ordersChart'), {
+        type:'line',
+        data:{labels:['Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May'],
+            datasets:[{label:'Orders',data:[42,51,60,65,78,95,112,70,53,62,50,17],
+                borderColor:gold,backgroundColor:goldA,fill:true,tension:0.3,pointRadius:4,pointBackgroundColor:gold}]},
+        options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+    });
+
+    new Chart(document.getElementById('productChart'), {
+        type:'doughnut',
+        data:{labels:['Small Batch','Single Barrel'],
+            datasets:[{data:[65,35],backgroundColor:['rgba(212,175,55,0.8)','rgba(139,90,43,0.8)'],
+                borderColor:['#d4af37','#8b5a2b'],borderWidth:2}]},
+        options:{responsive:true,plugins:{legend:{position:'bottom',labels:{padding:20}}}}
+    });
+
+    new Chart(document.getElementById('statesChart'), {
+        type:'bar',
+        data:{labels:['South Carolina','North Carolina','Georgia','Tennessee','Virginia','Florida'],
+            datasets:[{label:'Orders',data:[245,142,98,87,72,111],
+                backgroundColor:goldA,borderColor:gold,borderWidth:1,borderRadius:4}]},
+        options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}}
+    });
+});
+</script>
 {% endblock %}
