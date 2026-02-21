@@ -22,6 +22,10 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('static', 'manifest.json', mimetype='application/manifest+json')
+
 
 # ============================================================
 # GLOBAL ERROR HANDLERS — return JSON instead of HTML error pages
@@ -983,6 +987,7 @@ def api_generate_image():
         if use_reference:
             try:
                 from PIL import Image as PILImage
+                from PIL import ImageFilter as PILImageFilter
                 import numpy as np
                 import io
                 
@@ -1136,7 +1141,19 @@ def api_generate_image():
                         if img_b64:
                             final_bytes = b64.b64decode(img_b64)
                             final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                            
+                            # Hybrid paste-back: overlay original bottle
+                            try:
+                                final_rgba = final.convert('RGBA')
+                                alpha = bottle_resized.split()[3]
+                                alpha = alpha.filter(PILImageFilter.GaussianBlur(radius=1.5))
+                                bottle_paste = bottle_resized.copy()
+                                bottle_paste.putalpha(alpha)
+                                final_rgba.paste(bottle_paste, (x, y), bottle_paste)
+                                final = final_rgba.convert('RGB')
+                                print(f"[AI Studio] Paste-back applied at ({x}, {y})")
+                            except Exception as pb_err:
+                                print(f"[AI Studio] Paste-back skipped: {pb_err}")
+
                             filename = f"ai-composite-{int(time_module.time())}.png"
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
@@ -1221,7 +1238,19 @@ def api_generate_image():
                             if image_b64:
                                 final_bytes = b64.b64decode(image_b64)
                                 final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                                
+                                # Hybrid paste-back: overlay original bottle
+                                try:
+                                    final_rgba = final.convert('RGBA')
+                                    alpha = bottle_resized.split()[3]
+                                    alpha = alpha.filter(PILImageFilter.GaussianBlur(radius=1.5))
+                                    bottle_paste = bottle_resized.copy()
+                                    bottle_paste.putalpha(alpha)
+                                    final_rgba.paste(bottle_paste, (x, y), bottle_paste)
+                                    final = final_rgba.convert('RGB')
+                                    print(f"[AI Studio] Paste-back applied at ({x}, {y})")
+                                except Exception as pb_err:
+                                    print(f"[AI Studio] Paste-back skipped: {pb_err}")
+
                                 filename = f"ai-composite-{int(time_module.time())}.png"
                                 filepath = os.path.join(app.static_folder, 'uploads', filename)
                                 final.save(filepath, quality=95)
