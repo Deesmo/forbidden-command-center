@@ -1578,7 +1578,7 @@ def api_generate_video():
                 'promptText': prompt,
                 'model': model,
                 'duration': duration,
-                'ratio': '9:16' if data.get('portrait') else '16:9'
+                'ratio': '720:1280' if data.get('portrait') else '1280:720'  # Runway requires exact strings
             }
             if source_image:
                 payload['promptImage'] = source_image
@@ -1586,7 +1586,7 @@ def api_generate_video():
             print(f"[Video] Runway {model} — duration={duration}s, image={'yes' if source_image else 'no'}")
 
             resp = req.post(
-                'https://api.dev.runwayml.com/v1/image-to-video',   # FIX: hyphen not underscore
+                'https://api.dev.runwayml.com/v1/image_to_video',   # underscore — confirmed in Runway docs
                 headers={
                     'Authorization': f'Bearer {api_key}',
                     'Content-Type': 'application/json',
