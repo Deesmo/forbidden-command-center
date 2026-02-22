@@ -713,4 +713,60 @@
         });
     }
 </script>
+
+<!-- ===== CUTOUT CACHE CONTROL (injected by patch_aistudio.py) ===== -->
+<div id="cutoutCacheControl" style="
+    position: fixed;
+    bottom: 18px;
+    right: 18px;
+    z-index: 9999;
+    background: rgba(10,10,20,0.92);
+    border: 1px solid #ff6b35;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.5);
+">
+  <button id="clearCutoutBtn" onclick="clearCutoutCache()"
+          style="background:#ff6b35;border:none;color:#fff;padding:7px 14px;
+                 border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;
+                 letter-spacing:0.5px;white-space:nowrap;">
+    Clear Cutout Cache
+  </button>
+  <span id="clearCutoutMsg" style="font-size:11px;color:#aaa;max-width:240px;"></span>
+</div>
+<script>
+function clearCutoutCache() {
+  const btn = document.getElementById('clearCutoutBtn');
+  const msg = document.getElementById('clearCutoutMsg');
+  btn.disabled = true;
+  btn.textContent = 'Clearing...';
+  msg.style.color = '#aaa';
+  msg.textContent = '';
+  fetch('/api/ai/clear-cutout-cache', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        msg.style.color = '#4caf50';
+        msg.textContent = data.count > 0
+          ? 'Cleared ' + data.count + ' cutout(s). Next gen will re-extract via OpenAI API.'
+          : 'Cache was already empty.';
+      } else {
+        msg.style.color = '#f44336';
+        msg.textContent = 'Error: ' + data.error;
+      }
+      btn.textContent = 'Clear Cutout Cache';
+      btn.disabled = false;
+    })
+    .catch(e => {
+      msg.style.color = '#f44336';
+      msg.textContent = 'Request failed.';
+      btn.textContent = 'Clear Cutout Cache';
+      btn.disabled = false;
+    });
+}
+</script>
+<!-- ===== END CUTOUT CACHE CONTROL ===== -->
 {% endblock %}

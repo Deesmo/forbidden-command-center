@@ -940,17 +940,22 @@ def api_ai_save_key():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-def _get_bottle_cutout(source_path):
+def _get_bottle_cutout(source_path, api_key=None):
     """
     Return a clean RGBA PIL Image of the bottle with background removed.
-    Uses rembg (onnxruntime-based) for high-quality cutout.
-    Caches the result so it only runs once per source image.
-    Falls back to PIL color-range removal if rembg unavailable.
+    
+    Priority order (per OpenAI cookbook section 5.4 - Product Mockups):
+    1. OpenAI Edit API with background="transparent" — model understands product
+       geometry, glass panels, labels far better than any local threshold method.
+       Result is cached so API is only called once per source image.
+    2. PIL color-range fallback — crude but works if API unavailable.
     """
     import io as _io
     cache_dir = os.path.join(app.static_folder, 'uploads', 'cutout_cache')
     os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"cutout_{os.path.basename(source_path)}")
+    # Cache as PNG to preserve transparency
+    base_name = os.path.splitext(os.path.basename(source_path))[0]
+    cache_path = os.path.join(cache_dir, f"cutout_{base_name}.png")
     
     if os.path.exists(cache_path):
         print(f"[Cutout] Using cached cutout: {cache_path}")
@@ -958,32 +963,80 @@ def _get_bottle_cutout(source_path):
     
     print(f"[Cutout] Removing background from: {source_path}")
     
-    # Try rembg first (best quality)
-    try:
-        from rembg import remove as rembg_remove, new_session as rembg_session
-        # Use u2netp — lightweight 43MB model, good for product photos
-        session = rembg_session('u2netp')
-        with open(source_path, 'rb') as f:
-            input_data = f.read()
-        output_data = rembg_remove(input_data, session=session)
-        cutout = PILImage.open(_io.BytesIO(output_data)).convert('RGBA')
-        cutout.save(cache_path)
-        print(f"[Cutout] rembg success, saved to {cache_path}")
-        return cutout
-    except ImportError:
-        print("[Cutout] rembg not available, using PIL color-range removal")
-    except Exception as e:
-        print(f"[Cutout] rembg failed ({e}), falling back to PIL removal")
+    # ---- METHOD 1: OpenAI Edit API (cookbook 5.4 approach) ----
+    # Prompt: extract product, transparent background, preserve label exactly.
+    # Using background="transparent" param + extraction prompt = clean cutout.
+    if api_key:
+        try:
+            import requests as _req
+            
+            # Resize to max 1536px on longest side to stay within API limits
+            src_img = PILImage.open(source_path).convert('RGB')
+            max_dim = 1536
+            w, h = src_img.size
+            if max(w, h) > max_dim:
+                scale = max_dim / max(w, h)
+                src_img = src_img.resize((int(w*scale), int(h*scale)), PILImage.LANCZOS)
+            
+            img_buf = _io.BytesIO()
+            src_img.save(img_buf, format='PNG')
+            img_buf.seek(0)
+            img_bytes = img_buf.read()
+            
+            extraction_prompt = (
+                "Extract the bourbon bottle from this image. "
+                "Output: transparent background (RGBA), crisp clean silhouette, "
+                "no halos, no fringing, no shadow, no surface reflections. "
+                "Preserve every detail of the bottle exactly: "
+                "the hexagonal faceted glass panels, the label typography, "
+                "the brand emblem, liquid color, cap, and neck band. "
+                "Do not restyle, recolor, or alter the bottle in any way. "
+                "Only remove the background."
+            )
+            
+            resp = _req.post(
+                'https://api.openai.com/v1/images/edits',
+                headers={'Authorization': f'Bearer {api_key}'},
+                files=[('image[]', ('bottle.png', img_bytes, 'image/png'))],
+                data={
+                    'model': 'gpt-image-1.5',
+                    'prompt': extraction_prompt,
+                    'background': 'transparent',
+                    'quality': 'high',
+                    'size': '1024x1536',
+                    'input_fidelity': 'high',
+                    'output_format': 'png',
+                },
+                timeout=120
+            )
+            
+            if resp.status_code == 200:
+                import base64 as _b64
+                result = resp.json()
+                img_b64 = result.get('data', [{}])[0].get('b64_json')
+                if img_b64:
+                    cutout = PILImage.open(_io.BytesIO(_b64.b64decode(img_b64))).convert('RGBA')
+                    cutout.save(cache_path)
+                    print(f"[Cutout] OpenAI API extraction success, saved to {cache_path}")
+                    return cutout
+                else:
+                    print(f"[Cutout] OpenAI API: no b64_json in response")
+            else:
+                err = resp.json().get('error', {}).get('message', resp.text[:300])
+                print(f"[Cutout] OpenAI API failed ({resp.status_code}): {err}")
+        except Exception as e:
+            print(f"[Cutout] OpenAI API extraction exception: {e}")
     
-    # PIL fallback: flood-fill remove light background
-    # Works well for studio shots with near-white backgrounds
+    # ---- METHOD 2: PIL color-range fallback ----
+    # Samples corner pixels to detect background color, removes similar pixels.
+    # Less precise than API — can punch holes in light glass areas — but works
+    # without an API call and is fine for quick fallback.
     try:
+        print("[Cutout] Falling back to PIL color-range removal")
         img = PILImage.open(source_path).convert('RGBA')
         data = img.load()
         w, h = img.size
-        # Sample background color from corners
         corners = [data[0,0], data[w-1,0], data[0,h-1], data[w-1,h-1]]
-        # Average background color from non-transparent corners
         bg_samples = [(r,g,b) for (r,g,b,a) in corners if a > 200]
         if not bg_samples:
             bg_r, bg_g, bg_b = 255, 255, 255
@@ -991,21 +1044,18 @@ def _get_bottle_cutout(source_path):
             bg_r = sum(c[0] for c in bg_samples) // len(bg_samples)
             bg_g = sum(c[1] for c in bg_samples) // len(bg_samples)
             bg_b = sum(c[2] for c in bg_samples) // len(bg_samples)
-        
-        threshold = 40  # color distance tolerance
+        threshold = 35
         for y in range(h):
             for x in range(w):
                 r, g, b, a = data[x, y]
                 dist = ((r-bg_r)**2 + (g-bg_g)**2 + (b-bg_b)**2) ** 0.5
                 if dist < threshold:
-                    data[x, y] = (r, g, b, 0)  # make transparent
-        
+                    data[x, y] = (r, g, b, 0)
         img.save(cache_path)
-        print(f"[Cutout] PIL color-range removal done, saved to {cache_path}")
+        print(f"[Cutout] PIL color-range done, saved to {cache_path}")
         return img
     except Exception as e:
-        print(f"[Cutout] PIL fallback also failed: {e}")
-        # Last resort: return original image as-is
+        print(f"[Cutout] PIL fallback failed: {e}")
         return PILImage.open(source_path).convert('RGBA')
 
 
@@ -1128,7 +1178,7 @@ def api_generate_image():
             
             if source_path:
                 try:
-                    bottle_cutout = _get_bottle_cutout(source_path)
+                    bottle_cutout = _get_bottle_cutout(source_path, api_key=api_key)
                     print(f"[AI Studio] Got bottle cutout: {bottle_cutout.size}")
                 except Exception as e:
                     errors.append(f"Cutout: {str(e)[:200]}")
@@ -1395,6 +1445,23 @@ def api_video_status(task_id):
     
     except Exception as e:
         return jsonify({'status': 'ERROR', 'error': str(e)}), 500
+
+@app.route('/api/ai/clear-cutout-cache', methods=['POST'])
+def api_clear_cutout_cache():
+    """Delete all cached bottle cutouts so next generation re-extracts via OpenAI API."""
+    try:
+        cache_dir = os.path.join(app.static_folder, 'uploads', 'cutout_cache')
+        deleted = []
+        if os.path.exists(cache_dir):
+            for f in os.listdir(cache_dir):
+                if f.startswith('cutout_') and f.endswith('.png'):
+                    os.remove(os.path.join(cache_dir, f))
+                    deleted.append(f)
+        print(f"[Cutout] Cache cleared: {deleted}")
+        return jsonify({'success': True, 'deleted': deleted, 'count': len(deleted)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/ai/gallery', methods=['GET'])
 def api_ai_gallery():
