@@ -1494,97 +1494,174 @@ def api_generate_image():
 
 @app.route('/api/ai/generate-video', methods=['POST'])
 def api_generate_video():
-    """Generate a video using Runway ML"""
+    """
+    Generate a video using Runway ML (primary) or Luma Dream Machine (fallback).
+    Runway gen4_turbo: image→video, cinematic product shots, $0.25/5s
+    Luma Ray2: fast, cinematic, product explainers, ~$0.17-0.54/5s
+    """
     try:
         data = request.get_json()
         prompt = data.get('prompt', '')
-        duration = data.get('duration', 10)
+        duration = data.get('duration', 5)
         source_image = data.get('source_image', None)
-        
+        provider = data.get('provider', 'runway')   # 'runway' or 'luma'
+        model = data.get('model', 'gen4_turbo')     # gen4_turbo, gen4.5, veo3.1_fast
+
         if not prompt:
             return jsonify({'success': False, 'error': 'Prompt required'}), 400
-        
-        api_key = get_api_key('runway')
-        if not api_key:
-            return jsonify({'success': False, 'error': 'Runway ML API key not configured. Set RUNWAY_API_KEY in Render env vars.'}), 400
-        
+
         import requests as req
-        
-        headers = {
-            'Authorization': f"Bearer {api_key}",
-            'Content-Type': 'application/json',
-            'X-Runway-Version': '2024-11-06'
-        }
-        
-        payload = {
-            'promptText': prompt,
-            'model': 'gen4_turbo',
-            'duration': duration,
-            'ratio': '16:9'
-        }
-        
-        if source_image:
-            payload['promptImage'] = source_image
-        
-        resp = req.post(
-            'https://api.dev.runwayml.com/v1/image_to_video',
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        
-        if resp.status_code in (200, 201):
-            result = resp.json()
-            task_id = result.get('id', '')
-            return jsonify({'success': True, 'task_id': task_id})
+
+        # ── RUNWAY ML ──────────────────────────────────────────────────────────
+        if provider == 'runway':
+            api_key = get_api_key('runway')
+            if not api_key:
+                return jsonify({'success': False, 'error': 'Runway API key not configured. Set RUNWAY_API_KEY in Render env vars.'}), 400
+
+            # Clamp duration to Runway-supported values (5 or 10 seconds)
+            duration = 10 if int(duration) >= 8 else 5
+
+            payload = {
+                'promptText': prompt,
+                'model': model,
+                'duration': duration,
+                'ratio': '9:16' if data.get('portrait') else '16:9'
+            }
+            if source_image:
+                payload['promptImage'] = source_image
+
+            print(f"[Video] Runway {model} — duration={duration}s, image={'yes' if source_image else 'no'}")
+
+            resp = req.post(
+                'https://api.dev.runwayml.com/v1/image-to-video',   # FIX: hyphen not underscore
+                headers={
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json',
+                    'X-Runway-Version': '2024-11-06'
+                },
+                json=payload,
+                timeout=30
+            )
+
+            if resp.status_code in (200, 201):
+                result = resp.json()
+                task_id = result.get('id', '')
+                print(f"[Video] Runway task created: {task_id}")
+                return jsonify({'success': True, 'task_id': task_id, 'provider': 'runway'})
+            else:
+                try:
+                    error_msg = resp.json().get('error', resp.text[:300])
+                except Exception:
+                    error_msg = resp.text[:300]
+                print(f"[Video] Runway failed ({resp.status_code}): {error_msg}")
+                return jsonify({'success': False, 'error': f'Runway API Error ({resp.status_code}): {error_msg}'}), 500
+
+        # ── LUMA DREAM MACHINE ─────────────────────────────────────────────────
+        elif provider == 'luma':
+            luma_key = os.environ.get('LUMA_API_KEY', '')
+            if not luma_key:
+                return jsonify({'success': False, 'error': 'Luma API key not configured. Set LUMA_API_KEY in Render env vars.'}), 400
+
+            luma_model = data.get('luma_model', 'ray-2')   # ray-2 or ray-2-flash
+
+            payload = {
+                'prompt': prompt,
+                'model': luma_model,
+                'aspect_ratio': '9:16' if data.get('portrait') else '16:9',
+                'duration': '5s'
+            }
+            if source_image:
+                payload['keyframes'] = {
+                    'frame0': {'type': 'image', 'url': source_image}
+                }
+
+            print(f"[Video] Luma {luma_model} — image={'yes' if source_image else 'no'}")
+
+            resp = req.post(
+                'https://api.lumalabs.ai/dream-machine/v1/generations',
+                headers={
+                    'Authorization': f'Bearer {luma_key}',
+                    'Content-Type': 'application/json'
+                },
+                json=payload,
+                timeout=30
+            )
+
+            if resp.status_code in (200, 201):
+                result = resp.json()
+                task_id = result.get('id', '')
+                print(f"[Video] Luma generation created: {task_id}")
+                return jsonify({'success': True, 'task_id': task_id, 'provider': 'luma'})
+            else:
+                try:
+                    error_msg = resp.json().get('detail', resp.text[:300])
+                except Exception:
+                    error_msg = resp.text[:300]
+                print(f"[Video] Luma failed ({resp.status_code}): {error_msg}")
+                return jsonify({'success': False, 'error': f'Luma API Error ({resp.status_code}): {error_msg}'}), 500
+
         else:
-            error_msg = resp.text
-            try:
-                error_msg = resp.json().get('error', resp.text)
-            except:
-                pass
-            return jsonify({'success': False, 'error': f'Runway API Error: {error_msg}'}), 500
-    
+            return jsonify({'success': False, 'error': f'Unknown provider: {provider}'}), 400
+
     except Exception as e:
+        import traceback
+        print(f"[Video] Exception: {traceback.format_exc()}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/ai/video-status/<task_id>', methods=['GET'])
 def api_video_status(task_id):
-    """Check Runway video generation status"""
+    """Check video generation status — supports Runway and Luma"""
     try:
-        api_key = get_api_key('runway')
-        if not api_key:
-            return jsonify({'success': False, 'error': 'Runway not configured'}), 400
-        
         import requests as req
-        resp = req.get(
-            f'https://api.dev.runwayml.com/v1/tasks/{task_id}',
-            headers={
-                'Authorization': f"Bearer {api_key}",
-                'X-Runway-Version': '2024-11-06'
-            },
-            timeout=15
-        )
-        
-        if resp.status_code == 200:
-            result = resp.json()
-            status = result.get('status', 'UNKNOWN')
-            video_url = None
-            
-            if status == 'SUCCEEDED':
-                output = result.get('output', [])
-                if output:
-                    video_url = output[0] if isinstance(output, list) else output
-                _save_to_gallery('video', video_url, '', '')
-            
-            return jsonify({
-                'status': status,
-                'video_url': video_url,
-                'error': result.get('failure', None)
-            })
+        provider = request.args.get('provider', 'runway')
+
+        if provider == 'runway':
+            api_key = get_api_key('runway')
+            if not api_key:
+                return jsonify({'status': 'ERROR', 'error': 'Runway not configured'}), 400
+            resp = req.get(
+                f'https://api.dev.runwayml.com/v1/tasks/{task_id}',
+                headers={'Authorization': f'Bearer {api_key}', 'X-Runway-Version': '2024-11-06'},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                status = result.get('status', 'UNKNOWN')
+                video_url = None
+                if status == 'SUCCEEDED':
+                    output = result.get('output', [])
+                    if output:
+                        video_url = output[0] if isinstance(output, list) else output
+                    _save_to_gallery('video', video_url, '', '')
+                return jsonify({'status': status, 'video_url': video_url, 'error': result.get('failure', None)})
+            else:
+                return jsonify({'status': 'ERROR', 'error': resp.text}), 500
+
+        elif provider == 'luma':
+            luma_key = os.environ.get('LUMA_API_KEY', '')
+            if not luma_key:
+                return jsonify({'status': 'ERROR', 'error': 'Luma not configured'}), 400
+            resp = req.get(
+                f'https://api.lumalabs.ai/dream-machine/v1/generations/{task_id}',
+                headers={'Authorization': f'Bearer {luma_key}'},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                status_map = {'pending': 'PENDING', 'dreaming': 'RUNNING', 'completed': 'SUCCEEDED', 'failed': 'FAILED'}
+                status = status_map.get(result.get('state', 'pending'), 'RUNNING')
+                video_url = None
+                if status == 'SUCCEEDED':
+                    video_url = result.get('assets', {}).get('video')
+                    if video_url:
+                        _save_to_gallery('video', video_url, '', '')
+                return jsonify({'status': status, 'video_url': video_url, 'error': result.get('failure_reason', None)})
+            else:
+                return jsonify({'status': 'ERROR', 'error': resp.text}), 500
+
         else:
-            return jsonify({'status': 'ERROR', 'error': resp.text}), 500
-    
+            return jsonify({'status': 'ERROR', 'error': f'Unknown provider: {provider}'}), 400
+
     except Exception as e:
         return jsonify({'status': 'ERROR', 'error': str(e)}), 500
 
