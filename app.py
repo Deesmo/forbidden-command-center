@@ -1032,6 +1032,7 @@ def _composite_bottle_on_bg(bottle_cutout, background_img, position='center', sc
     Adds realistic Gaussian drop shadow for integration.
     Returns final PIL Image (RGB).
     """
+    from PIL import Image as PILImage, ImageFilter
     import numpy as np_local
     
     bg = background_img.convert('RGBA')
