@@ -22,10 +22,6 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
-@app.route('/manifest.json')
-def manifest():
-    return send_from_directory('static', 'manifest.json', mimetype='application/manifest+json')
-
 
 # ============================================================
 # GLOBAL ERROR HANDLERS — return JSON instead of HTML error pages
@@ -987,7 +983,6 @@ def api_generate_image():
         if use_reference:
             try:
                 from PIL import Image as PILImage
-                from PIL import ImageFilter as PILImageFilter
                 import numpy as np
                 import io
                 
@@ -1044,6 +1039,31 @@ def api_generate_image():
                     img1_buffer.seek(0)
                     img1_bytes = img1_buffer.read()
                     
+                    # MASK: Transparent where we want the background replaced, opaque where bottle sits.
+                    # OpenAI Edit API: transparent pixels in the mask = "edit here", opaque = "preserve".
+                    # We generate the mask from the bottle's alpha channel so the model knows
+                    # exactly which pixels to change vs. preserve — this is critical for logo fidelity.
+                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 255))  # fully opaque = preserve all
+                    # Background region: make transparent so the model fills it in
+                    bg_layer = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))  # transparent = edit
+                    # Paste bottle SILHOUETTE onto the opaque mask canvas using bottle alpha as guide
+                    # Bottle alpha: near-255 = bottle, near-0 = transparent edges
+                    # We invert: bottle area stays opaque (black), background becomes transparent
+                    # Strategy: start with all transparent (edit everywhere), then stamp bottle area as opaque (preserve)
+                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))  # all transparent = edit all
+                    # Build bottle silhouette from its alpha channel
+                    bottle_alpha = bottle_resized.split()[3]  # alpha channel of the resized bottle
+                    # Create a solid black image same size as bottle to stamp onto mask
+                    bottle_solid = PILImage.new('RGBA', bottle_resized.size, (0, 0, 0, 255))
+                    # Use the bottle's own alpha to paste only the bottle silhouette as opaque black
+                    mask_canvas.paste(bottle_solid, (x, y), bottle_alpha)
+                    
+                    mask_buffer = io.BytesIO()
+                    mask_canvas.save(mask_buffer, format='PNG', optimize=False)
+                    mask_buffer.seek(0)
+                    mask_bytes = mask_buffer.read()
+                    print(f\"[AI Studio] Mask generated: {canvas_w}x{canvas_h}, bottle silhouette opaque at ({x},{y})\")
+                    
                     # IMAGE 2: Cropped label close-up (sends more detail to AI)
                     # Crop center 50% of bottle height where the label lives
                     label_top = int(original.height * 0.25)
@@ -1072,44 +1092,49 @@ def api_generate_image():
                     print(f"[AI Studio] Label crop: {lw}x{lh} on 1024x1024 canvas")
                     
                     # ---- STEP 3: BUILD PROMPT WITH EXACT LABEL TEXT ----
-                    # Spelling out brand text letter-by-letter per gpt-image-1.5 prompting guide
+                    # Cookbook best practice: structured order (scene → subject → details → constraints),
+                    # reference images by index, literal text in quotes or letter-by-letter.
                     if bottle_type == 'single_barrel':
                         label_text_desc = (
-                            'The label text reads exactly (preserve verbatim): '
-                            '"BOLD & ELEGANT" in small text at top of label, '
-                            '"F-O-R-B-I-D-D-E-N" as the large main brand name in ornate gold serif letters, '
-                            '"SINGLE BARREL" below the brand name, '
+                            'Label text verbatim (render exactly as shown, no substitutions): '
+                            '"BOLD & ELEGANT" small text at top, '
+                            '"F-O-R-B-I-D-D-E-N" large ornate gold serif brand name, '
+                            '"SINGLE BARREL" below brand name, '
                             '"STRAIGHT BOURBON WHISKEY" in gold capitals, '
                             '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
                             'Gold/copper label with barrel emblem badge. '
                         )
                     else:
                         label_text_desc = (
-                            'The label text reads exactly (preserve verbatim): '
-                            '"BOLD & ELEGANT" in small text at top of label, '
-                            '"F-O-R-B-I-D-D-E-N" as the large main brand name in ornate silver/white serif letters, '
+                            'Label text verbatim (render exactly as shown, no substitutions): '
+                            '"BOLD & ELEGANT" small text at top, '
+                            '"F-O-R-B-I-D-D-E-N" large ornate silver/white serif brand name, '
                             '"STRAIGHT BOURBON WHISKEY" in silver capitals below, '
                             '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
                             'Black/dark label with barrel emblem badge. '
                         )
+                    
                     edit_prompt = (
-                        "Change ONLY the plain gray background in Image 1. "
-                        "Keep everything else EXACTLY the same — "
-                        "the bottle, its shape, glass facets, liquid color, cap, neck band, "
-                        "label, text, logo, typography, and every visual detail must remain identical. "
-                        "Do NOT modify, restyle, or redraw the bottle in any way. "
-                        "\n\n"
-                        f"Replace the gray background with: {prompt}. "
-                        "Shot with a 50mm lens, shallow depth of field, soft directional lighting. "
-                        "Add realistic contact shadow beneath the bottle, natural caustic light "
-                        "through the glass, and subtle warm reflections on the surface. "
-                        "Luxury spirits advertisement aesthetic. "
-                        "\n\n"
-                        "Image 2 is a close-up of the bottle's label for reference. "
+                        # Scene/goal
+                        f"High-end spirits product photography: {prompt}. "
+                        # Image references (per cookbook multi-image pattern)
+                        "Image 1: bourbon bottle on plain gray background — this is the primary reference. "
+                        "Image 2: close-up crop of the bottle label for typography/logo detail reference. "
+                        # The edit task
+                        "EDIT: Replace ONLY the gray background with a photorealistic scene. "
+                        "Fill in surface, environment, and lighting — caustic light through glass, "
+                        "specular highlights on the faceted panels, warm surface reflections, soft contact shadow. "
+                        "Luxury spirits advertisement aesthetic, cinematic lighting. "
+                        # Label/text constraints (letter-by-letter per cookbook)
                         f"{label_text_desc}"
-                        "Preserve this label text EXACTLY as shown — do not alter any characters."
+                        # Hard preserve constraints (stated explicitly, one per line as cookbook recommends)
+                        "PRESERVE EXACTLY — do not change under any circumstances: "
+                        "1. Bottle geometry, hexagonal/faceted glass panels, and silhouette. "
+                        "2. All label text, logo, typography, badge emblems, and brand elements — render verbatim. "
+                        "3. Liquid color (deep amber), cap, neck band, and every surface detail. "
+                        "4. The bottle must be pixel-perfect identical to Image 1. "
+                        "CHANGE ONLY: the background and environmental lighting. Nothing else."
                     )
-                      
                     
                     # ---- STEP 4: TRY IMAGE EDIT API (gpt-image-1.5) ----
                     print(f"[AI Studio] Sending to Image Edit API with gpt-image-1.5 + input_fidelity=high...")
@@ -1117,6 +1142,7 @@ def api_generate_image():
                     edit_files = [
                         ('image[]', ('bottle_scene.png', img1_bytes, 'image/png')),
                         ('image[]', ('label_detail.png', img2_bytes, 'image/png')),
+                        ('mask', ('mask.png', mask_bytes, 'image/png')),
                     ]
                     edit_data = {
                         'model': 'gpt-image-1.5',
@@ -1141,19 +1167,7 @@ def api_generate_image():
                         if img_b64:
                             final_bytes = b64.b64decode(img_b64)
                             final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                            # Hybrid paste-back: overlay original bottle
-                            try:
-                                final_rgba = final.convert('RGBA')
-                                alpha = bottle_resized.split()[3]
-                                alpha = alpha.filter(PILImageFilter.GaussianBlur(radius=1.5))
-                                bottle_paste = bottle_resized.copy()
-                                bottle_paste.putalpha(alpha)
-                                final_rgba.paste(bottle_paste, (x, y), bottle_paste)
-                                final = final_rgba.convert('RGB')
-                                print(f"[AI Studio] Paste-back applied at ({x}, {y})")
-                            except Exception as pb_err:
-                                print(f"[AI Studio] Paste-back skipped: {pb_err}")
-
+                            
                             filename = f"ai-composite-{int(time_module.time())}.png"
                             filepath = os.path.join(app.static_folder, 'uploads', filename)
                             final.save(filepath, quality=95)
@@ -1218,7 +1232,6 @@ def api_generate_image():
                                     {
                                         'type': 'image_generation',
                                         'input_fidelity': 'high',
-                                        'action': 'edit',
                                         'quality': quality if quality in ('low', 'medium', 'high') else 'high',
                                         'size': gpt_size,
                                     },
@@ -1238,19 +1251,7 @@ def api_generate_image():
                             if image_b64:
                                 final_bytes = b64.b64decode(image_b64)
                                 final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                                # Hybrid paste-back: overlay original bottle
-                                try:
-                                    final_rgba = final.convert('RGBA')
-                                    alpha = bottle_resized.split()[3]
-                                    alpha = alpha.filter(PILImageFilter.GaussianBlur(radius=1.5))
-                                    bottle_paste = bottle_resized.copy()
-                                    bottle_paste.putalpha(alpha)
-                                    final_rgba.paste(bottle_paste, (x, y), bottle_paste)
-                                    final = final_rgba.convert('RGB')
-                                    print(f"[AI Studio] Paste-back applied at ({x}, {y})")
-                                except Exception as pb_err:
-                                    print(f"[AI Studio] Paste-back skipped: {pb_err}")
-
+                                
                                 filename = f"ai-composite-{int(time_module.time())}.png"
                                 filepath = os.path.join(app.static_folder, 'uploads', filename)
                                 final.save(filepath, quality=95)
