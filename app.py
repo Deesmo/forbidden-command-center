@@ -155,6 +155,50 @@ try:
 except Exception as e:
     print(f"Brand mentions table: {e}")
 
+# Ensure ai_gallery table exists (with image_data for ephemeral-safe storage)
+try:
+    conn = db.get_db()
+    if db.USE_POSTGRES:
+        cur = conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS ai_gallery (
+            id SERIAL PRIMARY KEY,
+            media_type TEXT NOT NULL,
+            url TEXT NOT NULL,
+            prompt TEXT DEFAULT '',
+            revised_prompt TEXT DEFAULT '',
+            saved BOOLEAN DEFAULT FALSE,
+            bottle_type TEXT DEFAULT '',
+            image_data TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Migration: add image_data column if table already existed without it
+        try:
+            cur.execute("ALTER TABLE ai_gallery ADD COLUMN IF NOT EXISTS image_data TEXT DEFAULT ''")
+        except Exception:
+            pass
+    else:
+        conn.execute('''CREATE TABLE IF NOT EXISTS ai_gallery (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_type TEXT NOT NULL,
+            url TEXT NOT NULL,
+            prompt TEXT DEFAULT '',
+            revised_prompt TEXT DEFAULT '',
+            saved BOOLEAN DEFAULT 0,
+            bottle_type TEXT DEFAULT '',
+            image_data TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Migration: add image_data column if table already existed without it
+        try:
+            conn.execute("ALTER TABLE ai_gallery ADD COLUMN image_data TEXT DEFAULT ''")
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+    print("[Startup] AI gallery table verified")
+except Exception as e:
+    print(f"AI gallery table: {e}")
+
 # Auto-seed content library on first run
 try:
     from seed_content import seed
@@ -1476,7 +1520,16 @@ def api_generate_image():
             error_detail = ' | '.join(errors) if errors else 'No image data returned'
             return jsonify({'success': False, 'error': f'Image generation failed: {error_detail}'}), 500
         
-        _save_gallery_id = _save_to_gallery('image', image_url, prompt, bg_scene_prompt if use_reference else prompt, bottle_type if use_reference else '')
+        # Read image bytes into base64 — stored in DB so gallery survives Render restarts
+        _image_b64 = ''
+        try:
+            _img_path = app.static_folder + image_url[len('/static'):]
+            with open(_img_path, 'rb') as _f:
+                _image_b64 = b64.b64encode(_f.read()).decode('utf-8')
+        except Exception as _e:
+            print(f"[Gallery] Could not read image for b64 storage: {_e}")
+        
+        _save_gallery_id = _save_to_gallery('image', image_url, prompt, bg_scene_prompt if use_reference else prompt, bottle_type if use_reference else '', image_data=_image_b64)
         
         return jsonify({
             'success': True,
@@ -1693,12 +1746,31 @@ def api_ai_gallery():
         else:
             items = db._fetchall(conn, 'SELECT * FROM ai_gallery ORDER BY created_at DESC LIMIT 50')
         conn.close()
-        return jsonify({
-            'items': [{'id': i.get('id'), 'type': i['media_type'], 'url': i['url'], 
-                       'prompt': i['prompt'], 'created': str(i['created_at']),
-                       'saved': bool(i.get('saved', False)),
-                       'bottle_type': i.get('bottle_type', '')} for i in items]
-        })
+
+        result = []
+        for i in items:
+            url = i['url']
+            # If file is in ephemeral uploads and has been wiped on restart, serve from stored base64
+            if url.startswith('/static/uploads/'):
+                abs_path = app.static_folder + url[len('/static'):]
+                if not os.path.exists(abs_path):
+                    img_data = i.get('image_data', '') or ''
+                    if img_data:
+                        ext = 'png' if url.lower().endswith('.png') else 'jpeg'
+                        url = f'data:image/{ext};base64,{img_data}'
+                    else:
+                        url = ''  # genuinely gone, no backup stored
+            result.append({
+                'id': i.get('id'),
+                'type': i['media_type'],
+                'url': url,
+                'prompt': i['prompt'],
+                'created': str(i['created_at']),
+                'saved': bool(i.get('saved', False)),
+                'bottle_type': i.get('bottle_type', '')
+            })
+
+        return jsonify({'items': result})
     except Exception as e:
         return jsonify({'items': []})
 
@@ -1760,34 +1832,24 @@ def _get_featured_bottle_image():
     return None
 
 
-def _save_to_gallery(media_type, url, prompt, revised_prompt, bottle_type=''):
-    """Save generated media to gallery, returns the new row ID"""
+def _save_to_gallery(media_type, url, prompt, revised_prompt, bottle_type='', image_data=''):
+    """Save generated media to gallery, returns the new row ID.
+    image_data: base64 string of the image file — survives Render ephemeral filesystem resets.
+    """
     try:
         conn = db.get_db()
         if db.USE_POSTGRES:
             cur = conn.cursor()
             cur.execute(
-                'INSERT INTO ai_gallery (media_type, url, prompt, revised_prompt, bottle_type) VALUES (%s, %s, %s, %s, %s) RETURNING id',
-                (media_type, url or '', prompt, revised_prompt or '', bottle_type or '')
+                'INSERT INTO ai_gallery (media_type, url, prompt, revised_prompt, bottle_type, image_data) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
+                (media_type, url or '', prompt or '', revised_prompt or '', bottle_type or '', image_data or '')
             )
             row = cur.fetchone()
             new_id = row[0] if row else None
         else:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS ai_gallery (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    media_type TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    prompt TEXT DEFAULT '',
-                    revised_prompt TEXT DEFAULT '',
-                    saved BOOLEAN DEFAULT 0,
-                    bottle_type TEXT DEFAULT '',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
             cur = conn.execute(
-                'INSERT INTO ai_gallery (media_type, url, prompt, revised_prompt, bottle_type) VALUES (?, ?, ?, ?, ?)',
-                (media_type, url or '', prompt, revised_prompt or '', bottle_type or '')
+                'INSERT INTO ai_gallery (media_type, url, prompt, revised_prompt, bottle_type, image_data) VALUES (?, ?, ?, ?, ?, ?)',
+                (media_type, url or '', prompt or '', revised_prompt or '', bottle_type or '', image_data or '')
             )
             new_id = cur.lastrowid
         conn.commit()
