@@ -943,97 +943,63 @@ def api_ai_save_key():
 def _get_bottle_cutout(source_path, api_key=None):
     """
     Return a clean RGBA PIL Image of the bottle with background removed.
-    
-    Priority order (per OpenAI cookbook section 5.4 - Product Mockups):
-    1. OpenAI Edit API with background="transparent" — model understands product
-       geometry, glass panels, labels far better than any local threshold method.
-       Result is cached so API is only called once per source image.
-    2. PIL color-range fallback — crude but works if API unavailable.
+
+    Method 1 — remove.bg API (pixel-perfect segmentation, zero hallucination).
+      Pure computer vision: classifies every pixel as foreground/background.
+      Your exact bottle pixels come through untouched — label, badge, glass,
+      liquid color, all identical to the source photo. Cached after first call.
+      Requires REMOVEBG_API_KEY env var on Render.
+
+    Method 2 — PIL color-range fallback.
+      Used only if remove.bg key is absent or call fails. Less precise but
+      never hallucinates — still your real pixels, just rougher edges.
     """
     from PIL import Image as PILImage
     import io as _io
+    import requests as _req
+
     cache_dir = os.path.join(app.static_folder, 'uploads', 'cutout_cache')
     os.makedirs(cache_dir, exist_ok=True)
-    # Cache as PNG to preserve transparency
     base_name = os.path.splitext(os.path.basename(source_path))[0]
     cache_path = os.path.join(cache_dir, f"cutout_{base_name}.png")
-    
+
     if os.path.exists(cache_path):
         print(f"[Cutout] Using cached cutout: {cache_path}")
         return PILImage.open(cache_path).convert('RGBA')
-    
+
     print(f"[Cutout] Removing background from: {source_path}")
-    
-    # ---- METHOD 1: OpenAI Edit API (cookbook 5.4 approach) ----
-    # Prompt: extract product, transparent background, preserve label exactly.
-    # Using background="transparent" param + extraction prompt = clean cutout.
-    if api_key:
+
+    # ---- METHOD 1: remove.bg API ----
+    removebg_key = os.environ.get('REMOVEBG_API_KEY', '')
+    if removebg_key:
         try:
-            import requests as _req
-            
-            # Resize to max 1536px on longest side to stay within API limits
-            src_img = PILImage.open(source_path).convert('RGB')
-            max_dim = 1536
-            w, h = src_img.size
-            if max(w, h) > max_dim:
-                scale = max_dim / max(w, h)
-                src_img = src_img.resize((int(w*scale), int(h*scale)), PILImage.LANCZOS)
-            
-            img_buf = _io.BytesIO()
-            src_img.save(img_buf, format='PNG')
-            img_buf.seek(0)
-            img_bytes = img_buf.read()
-            
-            extraction_prompt = (
-                "Extract the bourbon bottle from this image. "
-                "Output: transparent background (RGBA), crisp clean silhouette, "
-                "no halos, no fringing, no shadow, no surface reflections. "
-                "Preserve every detail of the bottle exactly: "
-                "the hexagonal faceted glass panels, the label typography, "
-                "the brand emblem, liquid color, cap, and neck band. "
-                "Do not restyle, recolor, or alter the bottle in any way. "
-                "Only remove the background."
-            )
-            
+            with open(source_path, 'rb') as f:
+                img_bytes = f.read()
+
             resp = _req.post(
-                'https://api.openai.com/v1/images/edits',
-                headers={'Authorization': f'Bearer {api_key}'},
-                files=[('image[]', ('bottle.png', img_bytes, 'image/png'))],
-                data={
-                    'model': 'gpt-image-1.5',
-                    'prompt': extraction_prompt,
-                    'background': 'transparent',
-                    'quality': 'high',
-                    'size': '1024x1536',
-                    'input_fidelity': 'high',
-                    'output_format': 'png',
-                },
-                timeout=120
+                'https://api.remove.bg/v1.0/removebg',
+                headers={'X-Api-Key': removebg_key},
+                files={'image_file': ('bottle.png', img_bytes, 'image/png')},
+                data={'size': 'auto'},
+                timeout=60
             )
-            
+
             if resp.status_code == 200:
-                import base64 as _b64
-                result = resp.json()
-                img_b64 = result.get('data', [{}])[0].get('b64_json')
-                if img_b64:
-                    cutout = PILImage.open(_io.BytesIO(_b64.b64decode(img_b64))).convert('RGBA')
-                    cutout.save(cache_path)
-                    print(f"[Cutout] OpenAI API extraction success, saved to {cache_path}")
-                    return cutout
-                else:
-                    print(f"[Cutout] OpenAI API: no b64_json in response")
+                cutout = PILImage.open(_io.BytesIO(resp.content)).convert('RGBA')
+                cutout.save(cache_path)
+                print(f"[Cutout] remove.bg success — {cutout.size}, saved to {cache_path}")
+                return cutout
             else:
-                err = resp.json().get('error', {}).get('message', resp.text[:300])
-                print(f"[Cutout] OpenAI API failed ({resp.status_code}): {err}")
+                err = resp.json().get('errors', [{}])[0].get('title', resp.text[:200])
+                print(f"[Cutout] remove.bg failed ({resp.status_code}): {err}")
         except Exception as e:
-            print(f"[Cutout] OpenAI API extraction exception: {e}")
-    
+            print(f"[Cutout] remove.bg exception: {e}")
+    else:
+        print("[Cutout] REMOVEBG_API_KEY not set — falling back to PIL removal")
+
     # ---- METHOD 2: PIL color-range fallback ----
-    # Samples corner pixels to detect background color, removes similar pixels.
-    # Less precise than API — can punch holes in light glass areas — but works
-    # without an API call and is fine for quick fallback.
     try:
-        print("[Cutout] Falling back to PIL color-range removal")
+        print("[Cutout] Using PIL color-range removal (rough edges, real pixels)")
         img = PILImage.open(source_path).convert('RGBA')
         data = img.load()
         w, h = img.size
