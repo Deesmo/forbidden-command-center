@@ -950,6 +950,7 @@ def _get_bottle_cutout(source_path, api_key=None):
        Result is cached so API is only called once per source image.
     2. PIL color-range fallback — crude but works if API unavailable.
     """
+    from PIL import Image as PILImage
     import io as _io
     cache_dir = os.path.join(app.static_folder, 'uploads', 'cutout_cache')
     os.makedirs(cache_dir, exist_ok=True)
