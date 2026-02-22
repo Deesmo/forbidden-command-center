@@ -940,24 +940,148 @@ def api_ai_save_key():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _get_bottle_cutout(source_path):
+    """
+    Return a clean RGBA PIL Image of the bottle with background removed.
+    Uses rembg (onnxruntime-based) for high-quality cutout.
+    Caches the result so it only runs once per source image.
+    Falls back to PIL color-range removal if rembg unavailable.
+    """
+    import io as _io
+    cache_dir = os.path.join(app.static_folder, 'uploads', 'cutout_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"cutout_{os.path.basename(source_path)}")
+    
+    if os.path.exists(cache_path):
+        print(f"[Cutout] Using cached cutout: {cache_path}")
+        return PILImage.open(cache_path).convert('RGBA')
+    
+    print(f"[Cutout] Removing background from: {source_path}")
+    
+    # Try rembg first (best quality)
+    try:
+        from rembg import remove as rembg_remove, new_session as rembg_session
+        # Use u2netp — lightweight 43MB model, good for product photos
+        session = rembg_session('u2netp')
+        with open(source_path, 'rb') as f:
+            input_data = f.read()
+        output_data = rembg_remove(input_data, session=session)
+        cutout = PILImage.open(_io.BytesIO(output_data)).convert('RGBA')
+        cutout.save(cache_path)
+        print(f"[Cutout] rembg success, saved to {cache_path}")
+        return cutout
+    except ImportError:
+        print("[Cutout] rembg not available, using PIL color-range removal")
+    except Exception as e:
+        print(f"[Cutout] rembg failed ({e}), falling back to PIL removal")
+    
+    # PIL fallback: flood-fill remove light background
+    # Works well for studio shots with near-white backgrounds
+    try:
+        img = PILImage.open(source_path).convert('RGBA')
+        data = img.load()
+        w, h = img.size
+        # Sample background color from corners
+        corners = [data[0,0], data[w-1,0], data[0,h-1], data[w-1,h-1]]
+        # Average background color from non-transparent corners
+        bg_samples = [(r,g,b) for (r,g,b,a) in corners if a > 200]
+        if not bg_samples:
+            bg_r, bg_g, bg_b = 255, 255, 255
+        else:
+            bg_r = sum(c[0] for c in bg_samples) // len(bg_samples)
+            bg_g = sum(c[1] for c in bg_samples) // len(bg_samples)
+            bg_b = sum(c[2] for c in bg_samples) // len(bg_samples)
+        
+        threshold = 40  # color distance tolerance
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = data[x, y]
+                dist = ((r-bg_r)**2 + (g-bg_g)**2 + (b-bg_b)**2) ** 0.5
+                if dist < threshold:
+                    data[x, y] = (r, g, b, 0)  # make transparent
+        
+        img.save(cache_path)
+        print(f"[Cutout] PIL color-range removal done, saved to {cache_path}")
+        return img
+    except Exception as e:
+        print(f"[Cutout] PIL fallback also failed: {e}")
+        # Last resort: return original image as-is
+        return PILImage.open(source_path).convert('RGBA')
+
+
+def _composite_bottle_on_bg(bottle_cutout, background_img, position='center', scale=0.72):
+    """
+    Composite a transparent-background bottle cutout onto an AI background.
+    Adds realistic Gaussian drop shadow for integration.
+    Returns final PIL Image (RGB).
+    """
+    import numpy as np_local
+    
+    bg = background_img.convert('RGBA')
+    bg_w, bg_h = bg.size
+    
+    # Scale bottle to target height
+    scale = max(0.4, min(0.88, float(scale)))
+    target_h = int(bg_h * scale)
+    aspect = bottle_cutout.width / bottle_cutout.height
+    target_w = int(target_h * aspect)
+    bottle = bottle_cutout.resize((target_w, target_h), PILImage.LANCZOS)
+    
+    # Position
+    if position == 'left':
+        x = int(bg_w * 0.12)
+    elif position == 'right':
+        x = bg_w - target_w - int(bg_w * 0.12)
+    else:
+        x = (bg_w - target_w) // 2
+    y = bg_h - target_h - int(bg_h * 0.04)  # 4% margin from bottom
+    
+    # --- SHADOW ---
+    # 1. Extract bottle alpha silhouette
+    shadow_layer = PILImage.new('RGBA', (bg_w, bg_h), (0,0,0,0))
+    # Solid dark fill using bottle alpha as mask
+    shadow_color = PILImage.new('RGBA', bottle.size, (20, 10, 5, 180))  # warm dark shadow
+    shadow_layer.paste(shadow_color, (x, y), bottle.split()[3])
+    
+    # 2. Gaussian blur the shadow for realism
+    from PIL import ImageFilter
+    shadow_blur_radius = max(12, int(target_w * 0.04))  # proportional to bottle width
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=shadow_blur_radius))
+    
+    # 3. Offset shadow slightly down-right (light source is upper-left)
+    shadow_offset_x = int(target_w * 0.025)
+    shadow_offset_y = int(target_h * 0.015)
+    shadow_final = PILImage.new('RGBA', (bg_w, bg_h), (0,0,0,0))
+    shadow_final.paste(shadow_layer, (shadow_offset_x, shadow_offset_y))
+    
+    # --- COMPOSITE: bg → shadow → bottle ---
+    result = bg.copy()
+    result = PILImage.alpha_composite(result, shadow_final)
+    bottle_layer = PILImage.new('RGBA', (bg_w, bg_h), (0,0,0,0))
+    bottle_layer.paste(bottle, (x, y), bottle.split()[3])
+    result = PILImage.alpha_composite(result, bottle_layer)
+    
+    return result.convert('RGB')
+
+
 @app.route('/api/ai/generate-image', methods=['POST'])
 def api_generate_image():
-    """Generate a product image using COMPOSITE approach:
-    1. AI generates ONLY the background scene (no bottle)
-    2. Real bottle photo gets background removed (cutout)
-    3. Real bottle composited onto AI scene with shadow + reflection
-    Result: 100% accurate bottle + creative AI backgrounds
+    """
+    TRUE COMPOSITE: 3-step pipeline for pixel-perfect brand accuracy.
+    Step 1: rembg removes background from hi-res studio photo → exact bottle cutout
+    Step 2: gpt-image-1.5 generates ONLY the background scene (no bottle at all)
+    Step 3: PIL composites real bottle onto AI background with Gaussian shadow
+    Result: 100% accurate bottle/label + beautiful AI backgrounds, social-media ready
     """
     try:
         data = request.get_json()
         prompt = data.get('prompt', '')
-        size = data.get('size', '1024x1024')
+        size = data.get('size', '1024x1536')
         quality = data.get('quality', 'high')
         use_reference = data.get('use_reference', True)
         bottle_position = data.get('bottle_position', 'center')
-        bottle_scale = data.get('bottle_scale', 0.65)
-        bottle_type = data.get('bottle_type', 'small_batch')  # small_batch or single_barrel
-        ai_refine = data.get('ai_refine', False)  # AI refinement pass
+        bottle_scale = data.get('bottle_scale', 0.72)
+        bottle_type = data.get('bottle_type', 'small_batch')
         
         if not prompt:
             return jsonify({'success': False, 'error': 'Prompt required'}), 400
@@ -968,338 +1092,151 @@ def api_generate_image():
         
         import base64 as b64
         import requests as req
+        from PIL import Image as PILImage, ImageFilter
+        import io
         
+        gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1536'
         image_url = None
-        revised_prompt = prompt
         model_used = None
         errors = []
         
         # =====================================================
-        # COMPOSITE MODE: Image Edit API with gpt-image-1.5
-        # Uses high input fidelity + multi-image (bottle + label crop)
-        # for maximum label/logo preservation. Falls back to
-        # Responses API if Edit API fails.
+        # STEP 1: GET BOTTLE CUTOUT (real photo, exact pixels)
         # =====================================================
+        bottle_cutout = None
         if use_reference:
+            if bottle_type == 'single_barrel':
+                source_candidates = [
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_58_LightBG_V1.png'),
+                ]
+            else:
+                source_candidates = [
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
+                ]
+            
+            source_path = next((c for c in source_candidates if os.path.exists(c)), None)
+            
+            if source_path:
+                try:
+                    bottle_cutout = _get_bottle_cutout(source_path)
+                    print(f"[AI Studio] Got bottle cutout: {bottle_cutout.size}")
+                except Exception as e:
+                    errors.append(f"Cutout: {str(e)[:200]}")
+                    print(f"[AI Studio] Cutout failed: {e}")
+            else:
+                errors.append(f"No studio photo found for {bottle_type}")
+        
+        # =====================================================
+        # STEP 2: GENERATE BACKGROUND SCENE (AI, no bottle)
+        # =====================================================
+        background_img = None
+        
+        # Background prompt: describe the scene WITHOUT any bottle/product
+        # The bottle is composited in Step 3 — AI only draws the environment
+        bg_scene_prompt = (
+            f"{prompt}. "
+            "Environment only — no bottles, no products, no objects. "
+            "Just the surface, background, and lighting. "
+            "Flat polished surface in the foreground for a luxury product to rest on. "
+            "High-end spirits advertisement environment. "
+            "Cinematic lighting, rich atmospheric depth. "
+            "Shot with 35mm lens, shallow depth of field, moody and dramatic. "
+            "Photorealistic, commercial photography quality."
+        )
+        
+        print(f"[AI Studio] Generating background with gpt-image-1.5...")
+        try:
+            resp = req.post(
+                'https://api.openai.com/v1/images/generations',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json={
+                    'model': 'gpt-image-1.5',
+                    'prompt': bg_scene_prompt,
+                    'n': 1,
+                    'size': gpt_size,
+                    'quality': quality if quality in ('low', 'medium', 'high') else 'high',
+                    'output_format': 'png',
+                },
+                timeout=120
+            )
+            
+            if resp.status_code == 200:
+                result = resp.json()
+                img_b64 = result.get('data', [{}])[0].get('b64_json')
+                if img_b64:
+                    bg_bytes = b64.b64decode(img_b64)
+                    background_img = PILImage.open(io.BytesIO(bg_bytes)).convert('RGBA')
+                    print(f"[AI Studio] Background generated: {background_img.size}")
+                else:
+                    errors.append("Background generation: no image data")
+            else:
+                err_msg = 'Unknown error'
+                try:
+                    err_msg = resp.json().get('error', {}).get('message', resp.text[:500])
+                except:
+                    err_msg = resp.text[:500]
+                errors.append(f"Background generation: {err_msg}")
+                print(f"[AI Studio] Background generation failed ({resp.status_code}): {err_msg}")
+        except Exception as e:
+            errors.append(f"Background generation: {str(e)[:200]}")
+            print(f"[AI Studio] Background generation exception: {e}")
+        
+        # =====================================================
+        # STEP 3: COMPOSITE BOTTLE ONTO BACKGROUND
+        # =====================================================
+        if bottle_cutout and background_img:
             try:
-                from PIL import Image as PILImage
-                import numpy as np
-                import io
-                
-                # ---- STEP 1: GET ORIGINAL STUDIO PHOTO ----
-                if bottle_type == 'single_barrel':
-                    source_candidates = [
-                        os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
-                        os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_58_LightBG_V1.png'),
-                    ]
-                else:
-                    source_candidates = [
-                        os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
-                    ]
-                
-                source_path = None
-                for c in source_candidates:
-                    if os.path.exists(c):
-                        source_path = c
-                        break
-                
-                if not source_path:
-                    errors.append(f"No studio photo found for {bottle_type}")
-                else:
-                    # ---- STEP 2: PREPARE IMAGES FOR API ----
-                    gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1536'
-                    canvas_w, canvas_h = [int(d) for d in gpt_size.split('x')]
-                    
-                    original = PILImage.open(source_path).convert('RGBA')
-                    print(f"[AI Studio] Original photo: {original.size} from {source_path}")
-                    
-                    # Scale bottle to desired size on canvas
-                    scale_factor = max(0.3, min(0.85, float(bottle_scale or 0.65)))
-                    target_h = int(canvas_h * scale_factor)
-                    aspect = original.width / original.height
-                    target_w = int(target_h * aspect)
-                    bottle_resized = original.resize((target_w, target_h), PILImage.LANCZOS)
-                    
-                    # Position
-                    pos = bottle_position or 'center'
-                    if pos == 'left':
-                        x = int(canvas_w * 0.15)
-                    elif pos == 'right':
-                        x = canvas_w - target_w - int(canvas_w * 0.15)
-                    else:
-                        x = (canvas_w - target_w) // 2
-                    y = canvas_h - target_h - int(canvas_h * 0.06)
-                    
-                    # IMAGE 1: Bottle on neutral gray canvas (primary — gets best fidelity)
-                    image_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (180, 180, 180, 255))
-                    image_canvas.paste(bottle_resized, (x, y), bottle_resized)
-                    
-                    img1_buffer = io.BytesIO()
-                    image_canvas.convert('RGB').save(img1_buffer, format='PNG', optimize=False)
-                    img1_buffer.seek(0)
-                    img1_bytes = img1_buffer.read()
-                    
-                    # MASK: Transparent where we want the background replaced, opaque where bottle sits.
-                    # OpenAI Edit API: transparent pixels in the mask = "edit here", opaque = "preserve".
-                    # We generate the mask from the bottle's alpha channel so the model knows
-                    # exactly which pixels to change vs. preserve — this is critical for logo fidelity.
-                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 255))  # fully opaque = preserve all
-                    # Background region: make transparent so the model fills it in
-                    bg_layer = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))  # transparent = edit
-                    # Paste bottle SILHOUETTE onto the opaque mask canvas using bottle alpha as guide
-                    # Bottle alpha: near-255 = bottle, near-0 = transparent edges
-                    # We invert: bottle area stays opaque (black), background becomes transparent
-                    # Strategy: start with all transparent (edit everywhere), then stamp bottle area as opaque (preserve)
-                    mask_canvas = PILImage.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))  # all transparent = edit all
-                    # Build bottle silhouette from its alpha channel
-                    bottle_alpha = bottle_resized.split()[3]  # alpha channel of the resized bottle
-                    # Create a solid black image same size as bottle to stamp onto mask
-                    bottle_solid = PILImage.new('RGBA', bottle_resized.size, (0, 0, 0, 255))
-                    # Use the bottle's own alpha to paste only the bottle silhouette as opaque black
-                    mask_canvas.paste(bottle_solid, (x, y), bottle_alpha)
-                    
-                    mask_buffer = io.BytesIO()
-                    mask_canvas.save(mask_buffer, format='PNG', optimize=False)
-                    mask_buffer.seek(0)
-                    mask_bytes = mask_buffer.read()
-                    print(f\"[AI Studio] Mask generated: {canvas_w}x{canvas_h}, bottle silhouette opaque at ({x},{y})\")
-                    
-                    # IMAGE 2: Cropped label close-up (sends more detail to AI)
-                    # Crop center 50% of bottle height where the label lives
-                    label_top = int(original.height * 0.25)
-                    label_bottom = int(original.height * 0.75)
-                    label_crop = original.crop((0, label_top, original.width, label_bottom))
-                    # Resize label crop to fill a square for maximum pixel detail
-                    label_size = min(1024, max(label_crop.width, label_crop.height))
-                    label_aspect = label_crop.width / label_crop.height
-                    if label_aspect > 1:
-                        lw, lh = label_size, int(label_size / label_aspect)
-                    else:
-                        lw, lh = int(label_size * label_aspect), label_size
-                    label_crop = label_crop.resize((lw, lh), PILImage.LANCZOS)
-                    # Place on white canvas
-                    label_canvas = PILImage.new('RGBA', (1024, 1024), (255, 255, 255, 255))
-                    lx = (1024 - lw) // 2
-                    ly = (1024 - lh) // 2
-                    label_canvas.paste(label_crop, (lx, ly), label_crop)
-                    
-                    img2_buffer = io.BytesIO()
-                    label_canvas.convert('RGB').save(img2_buffer, format='PNG', optimize=False)
-                    img2_buffer.seek(0)
-                    img2_bytes = img2_buffer.read()
-                    
-                    print(f"[AI Studio] Canvas: {canvas_w}x{canvas_h}, bottle at ({x},{y}) size {target_w}x{target_h}")
-                    print(f"[AI Studio] Label crop: {lw}x{lh} on 1024x1024 canvas")
-                    
-                    # ---- STEP 3: BUILD PROMPT WITH EXACT LABEL TEXT ----
-                    # Cookbook best practice: structured order (scene → subject → details → constraints),
-                    # reference images by index, literal text in quotes or letter-by-letter.
-                    if bottle_type == 'single_barrel':
-                        label_text_desc = (
-                            'Label text verbatim (render exactly as shown, no substitutions): '
-                            '"BOLD & ELEGANT" small text at top, '
-                            '"F-O-R-B-I-D-D-E-N" large ornate gold serif brand name, '
-                            '"SINGLE BARREL" below brand name, '
-                            '"STRAIGHT BOURBON WHISKEY" in gold capitals, '
-                            '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
-                            'Gold/copper label with barrel emblem badge. '
-                        )
-                    else:
-                        label_text_desc = (
-                            'Label text verbatim (render exactly as shown, no substitutions): '
-                            '"BOLD & ELEGANT" small text at top, '
-                            '"F-O-R-B-I-D-D-E-N" large ornate silver/white serif brand name, '
-                            '"STRAIGHT BOURBON WHISKEY" in silver capitals below, '
-                            '"SMALL BATCH MEDICINAL SPIRITS COMPANY" at bottom. '
-                            'Black/dark label with barrel emblem badge. '
-                        )
-                    
-                    edit_prompt = (
-                        # Scene/goal
-                        f"High-end spirits product photography: {prompt}. "
-                        # Image references (per cookbook multi-image pattern)
-                        "Image 1: bourbon bottle on plain gray background — this is the primary reference. "
-                        "Image 2: close-up crop of the bottle label for typography/logo detail reference. "
-                        # The edit task
-                        "EDIT: Replace ONLY the gray background with a photorealistic scene. "
-                        "Fill in surface, environment, and lighting — caustic light through glass, "
-                        "specular highlights on the faceted panels, warm surface reflections, soft contact shadow. "
-                        "Luxury spirits advertisement aesthetic, cinematic lighting. "
-                        # Label/text constraints (letter-by-letter per cookbook)
-                        f"{label_text_desc}"
-                        # Hard preserve constraints (stated explicitly, one per line as cookbook recommends)
-                        "PRESERVE EXACTLY — do not change under any circumstances: "
-                        "1. Bottle geometry, hexagonal/faceted glass panels, and silhouette. "
-                        "2. All label text, logo, typography, badge emblems, and brand elements — render verbatim. "
-                        "3. Liquid color (deep amber), cap, neck band, and every surface detail. "
-                        "4. The bottle must be pixel-perfect identical to Image 1. "
-                        "CHANGE ONLY: the background and environmental lighting. Nothing else."
-                    )
-                    
-                    # ---- STEP 4: TRY IMAGE EDIT API (gpt-image-1.5) ----
-                    print(f"[AI Studio] Sending to Image Edit API with gpt-image-1.5 + input_fidelity=high...")
-                    
-                    edit_files = [
-                        ('image[]', ('bottle_scene.png', img1_bytes, 'image/png')),
-                        ('image[]', ('label_detail.png', img2_bytes, 'image/png')),
-                        ('mask', ('mask.png', mask_bytes, 'image/png')),
-                    ]
-                    edit_data = {
-                        'model': 'gpt-image-1.5',
-                        'prompt': edit_prompt,
-                        'quality': quality if quality in ('low', 'medium', 'high') else 'high',
-                        'size': gpt_size,
-                        'input_fidelity': 'high',
-                        'output_format': 'png',
-                    }
-                    
-                    resp = req.post(
-                        'https://api.openai.com/v1/images/edits',
-                        headers={'Authorization': f'Bearer {api_key}'},
-                        files=edit_files,
-                        data=edit_data,
-                        timeout=180
-                    )
-                    
-                    if resp.status_code == 200:
-                        result = resp.json()
-                        img_b64 = result.get('data', [{}])[0].get('b64_json')
-                        if img_b64:
-                            final_bytes = b64.b64decode(img_b64)
-                            final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                            
-                            filename = f"ai-composite-{int(time_module.time())}.png"
-                            filepath = os.path.join(app.static_folder, 'uploads', filename)
-                            final.save(filepath, quality=95)
-                            image_url = f"/static/uploads/{filename}"
-                            model_used = f'gpt-image-1.5-edit-hifi ({bottle_type})'
-                            revised_prompt = edit_prompt
-                            print(f"[AI Studio] Image Edit API composite saved: {filepath}")
-                        else:
-                            errors.append("Image Edit API returned no image data")
-                            print(f"[AI Studio] Image Edit API: no b64_json in response")
-                    else:
-                        err_msg = 'Unknown error'
-                        try:
-                            err_msg = resp.json().get('error', {}).get('message', resp.text[:500])
-                        except:
-                            err_msg = resp.text[:500]
-                        errors.append(f"Image Edit API: {err_msg}")
-                        print(f"[AI Studio] Image Edit API failed ({resp.status_code}): {err_msg}")
-                    
-                    # ---- STEP 5: FALLBACK TO RESPONSES API IF EDIT API FAILED ----
-                    if not image_url:
-                        print(f"[AI Studio] Falling back to Responses API...")
-                        
-                        # Re-encode image 1 as base64 for Responses API (JSON format)
-                        img1_buffer.seek(0)
-                        img_b64_str = b64.b64encode(img1_bytes).decode('utf-8')
-                        data_url = f"data:image/png;base64,{img_b64_str}"
-                        
-                        fallback_prompt = (
-                            f"Professional product photography: {prompt}. "
-                            "This image shows a bourbon bottle on a plain gray background. "
-                            "Replace ONLY the gray background with a new photorealistic scene. "
-                            "Create a beautiful surface, environment, and lighting around the bottle. "
-                            "Add natural lighting interactions — caustic light through glass, "
-                            "specular highlights, warm reflections on the surface, realistic contact shadow. "
-                            "High-end spirits advertisement, luxury aesthetic, cinematic lighting. "
-                            f"{label_text_desc}"
-                            "CRITICAL CONSTRAINT: Preserve the bottle's geometry, labels, text, logo, "
-                            "liquid color, cap, and every visual detail EXACTLY as shown. "
-                            "Do NOT modify, restyle, redraw, or alter the bottle in any way. "
-                            "Change ONLY the background — keep the bottle pixel-perfect."
-                        )
-                        
-                        resp2 = req.post(
-                            'https://api.openai.com/v1/responses',
-                            headers={
-                                'Authorization': f'Bearer {api_key}',
-                                'Content-Type': 'application/json',
-                            },
-                            json={
-                                'model': 'gpt-4.1',
-                                'input': [
-                                    {
-                                        'role': 'user',
-                                        'content': [
-                                            {'type': 'input_text', 'text': fallback_prompt},
-                                            {'type': 'input_image', 'image_url': data_url},
-                                        ],
-                                    },
-                                ],
-                                'tools': [
-                                    {
-                                        'type': 'image_generation',
-                                        'input_fidelity': 'high',
-                                        'quality': quality if quality in ('low', 'medium', 'high') else 'high',
-                                        'size': gpt_size,
-                                    },
-                                ],
-                            },
-                            timeout=180
-                        )
-                        
-                        if resp2.status_code == 200:
-                            result2 = resp2.json()
-                            image_b64 = None
-                            for output_item in result2.get('output', []):
-                                if output_item.get('type') == 'image_generation_call':
-                                    image_b64 = output_item.get('result')
-                                    break
-                            
-                            if image_b64:
-                                final_bytes = b64.b64decode(image_b64)
-                                final = PILImage.open(io.BytesIO(final_bytes)).convert('RGB')
-                                
-                                filename = f"ai-composite-{int(time_module.time())}.png"
-                                filepath = os.path.join(app.static_folder, 'uploads', filename)
-                                final.save(filepath, quality=95)
-                                image_url = f"/static/uploads/{filename}"
-                                model_used = f'responses-api-hifi-fallback ({bottle_type})'
-                                revised_prompt = fallback_prompt
-                                print(f"[AI Studio] Responses API fallback saved: {filepath}")
-                            else:
-                                text_output = ''
-                                for output_item in result2.get('output', []):
-                                    if output_item.get('type') == 'message':
-                                        for content in output_item.get('content', []):
-                                            if content.get('type') == 'output_text':
-                                                text_output += content.get('text', '')
-                                errors.append(f"Responses API fallback: no image. {text_output[:300]}")
-                        else:
-                            err_msg2 = 'Unknown error'
-                            try:
-                                err_msg2 = resp2.json().get('error', {}).get('message', resp2.text[:500])
-                            except:
-                                err_msg2 = resp2.text[:500]
-                            errors.append(f"Responses API fallback: {err_msg2}")
-                            print(f"[AI Studio] Responses API fallback failed ({resp2.status_code}): {err_msg2}")
-                        
-            except ImportError as ie:
-                errors.append(f"Pillow/numpy not installed: {str(ie)}")
-                print(f"[AI Studio] Import error: {ie}")
+                final = _composite_bottle_on_bg(
+                    bottle_cutout, background_img,
+                    position=bottle_position,
+                    scale=float(bottle_scale or 0.72)
+                )
+                filename = f"ai-composite-{int(time_module.time())}.png"
+                filepath = os.path.join(app.static_folder, 'uploads', filename)
+                final.save(filepath, quality=95, optimize=False)
+                image_url = f"/static/uploads/{filename}"
+                model_used = f'true-composite-rembg+gpt-image-1.5 ({bottle_type})'
+                print(f"[AI Studio] Composite saved: {filepath}")
             except Exception as e:
                 import traceback
                 errors.append(f"Composite: {str(e)[:200]}")
                 print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
+        
+        # If reference failed but we have a background, save that at minimum
+        elif background_img and not bottle_cutout:
+            filename = f"ai-bg-{int(time_module.time())}.png"
+            filepath = os.path.join(app.static_folder, 'uploads', filename)
+            background_img.convert('RGB').save(filepath, quality=95)
+            image_url = f"/static/uploads/{filename}"
+            model_used = 'gpt-image-1.5-background-only'
+        
         # =====================================================
-        # FALLBACK: Text-only generation (no reference)
+        # FALLBACK: Text-only with bottle description
         # =====================================================
         if not image_url:
+            print(f"[AI Studio] Falling back to text-only generation...")
             try:
-                gpt_size = size if size in ('1024x1024', '1024x1536', '1536x1024') else '1024x1024'
+                if bottle_type == 'single_barrel':
+                    bottle_desc = (
+                        "Forbidden Bourbon Single Barrel bottle — hexagonal faceted crystal glass, "
+                        "gold/copper label reading 'FORBIDDEN' in ornate serif letters, "
+                        "'SINGLE BARREL STRAIGHT BOURBON WHISKEY', barrel badge emblem, "
+                        "dark wooden stopper cap, rich amber liquid."
+                    )
+                else:
+                    bottle_desc = (
+                        "Forbidden Bourbon bottle — hexagonal faceted crystal glass, "
+                        "black label reading 'FORBIDDEN' in ornate silver serif letters, "
+                        "'STRAIGHT BOURBON WHISKEY', barrel badge emblem, "
+                        "dark wooden stopper cap, rich deep amber liquid."
+                    )
                 
-                # Detailed bottle description for text-only mode
                 text_prompt = (
-                    "Photorealistic image of the Forbidden Bourbon bottle — ultra-premium straight bourbon whiskey. "
-                    "The bottle has a distinctive hexagonal/faceted crystal glass shape with angular geometric panels. "
-                    "Label: black label with 'BOLD & ELEGANT' in small gold text at top, "
-                    "'FORBIDDEN' in large ornate gold serif letters as main brand name, "
-                    "'STRAIGHT BOURBON WHISKEY' in gold capitals below, small barrel badge emblem in center, "
-                    "rectangular proof badge reading '100 PROOF | 750ML' near bottom. "
-                    "Dark wooden stopper cap with gold neck band. Rich deep amber liquid. "
-                    f"Scene: {prompt}"
+                    f"Ultra-premium spirits product photography: {prompt}. "
+                    f"{bottle_desc} "
+                    "Cinematic luxury advertisement. Photorealistic, commercial photography, "
+                    "shot with 35mm lens, dramatic lighting."
                 )
                 
                 resp = req.post(
@@ -1325,82 +1262,31 @@ def api_generate_image():
                         with open(filepath, 'wb') as f:
                             f.write(img_bytes)
                         image_url = f"/static/uploads/{filename}"
-                    elif img_data_resp.get('url'):
-                        image_url = img_data_resp['url']
-                    revised_prompt = img_data_resp.get('revised_prompt', prompt)
-                    model_used = 'gpt-image-1.5 (text-only, bottle approximate)'
+                    model_used = 'gpt-image-1.5 (text-only fallback)'
                 else:
-                    err_msg = 'Unknown error'
-                    try:
-                        err_msg = resp.json().get('error', {}).get('message', resp.text[:300])
-                    except:
-                        err_msg = resp.text[:300]
-                    errors.append(f"gpt-image-1.5 gen: {err_msg}")
+                    err_msg = resp.json().get('error', {}).get('message', resp.text[:300])
+                    errors.append(f"Text-only fallback: {err_msg}")
             except Exception as e:
-                errors.append(f"gpt-image-1.5 gen: {str(e)[:200]}")
-        
-        # =====================================================
-        # DALL-E 3 last resort fallback
-        # =====================================================
-        if not image_url:
-            try:
-                dalle_size = size if size in ('1024x1024', '1024x1792', '1792x1024') else '1024x1024'
-                dalle_quality = 'hd' if quality in ('high', 'hd') else 'standard'
-                
-                resp = req.post(
-                    'https://api.openai.com/v1/images/generations',
-                    headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-                    json={
-                        'model': 'dall-e-3',
-                        'prompt': prompt,
-                        'n': 1,
-                        'size': dalle_size,
-                        'quality': dalle_quality,
-                    },
-                    timeout=90
-                )
-                
-                if resp.status_code == 200:
-                    result = resp.json()
-                    img_data = result['data'][0]
-                    if img_data.get('url'):
-                        image_url = img_data['url']
-                    elif img_data.get('b64_json'):
-                        img_bytes = b64.b64decode(img_data['b64_json'])
-                        filename = f"ai-gen-{int(time_module.time())}.png"
-                        filepath = os.path.join(app.static_folder, 'uploads', filename)
-                        with open(filepath, 'wb') as f:
-                            f.write(img_bytes)
-                        image_url = f"/static/uploads/{filename}"
-                    revised_prompt = img_data.get('revised_prompt', prompt)
-                    model_used = 'dall-e-3 (no bottle ref)'
-                else:
-                    err_msg = 'Unknown error'
-                    try:
-                        err_msg = resp.json().get('error', {}).get('message', resp.text[:300])
-                    except:
-                        err_msg = resp.text[:300]
-                    errors.append(f"DALL-E 3: {err_msg}")
-            except Exception as e:
-                errors.append(f"DALL-E 3: {str(e)[:200]}")
+                errors.append(f"Text-only fallback: {str(e)[:200]}")
         
         if not image_url:
             error_detail = ' | '.join(errors) if errors else 'No image data returned'
             return jsonify({'success': False, 'error': f'Image generation failed: {error_detail}'}), 500
         
-        _save_gallery_id = _save_to_gallery('image', image_url, prompt, revised_prompt, bottle_type if use_reference else '')
+        _save_gallery_id = _save_to_gallery('image', image_url, prompt, bg_scene_prompt if use_reference else prompt, bottle_type if use_reference else '')
         
         return jsonify({
             'success': True,
             'image_url': image_url,
-            'revised_prompt': revised_prompt,
+            'revised_prompt': bg_scene_prompt if use_reference else prompt,
             'model': model_used,
-            'used_reference': use_reference and 'composite' in (model_used or ''),
+            'used_reference': bool(bottle_cutout and background_img),
             'gallery_id': _save_gallery_id
         })
     
     except Exception as e:
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
+
 
 @app.route('/api/ai/generate-video', methods=['POST'])
 def api_generate_video():
