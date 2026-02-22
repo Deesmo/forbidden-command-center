@@ -969,13 +969,35 @@ def _get_bottle_cutout(source_path, api_key=None):
 
     print(f"[Cutout] Removing background from: {source_path}")
 
+    # ---- PRE-PROCESS: Ensure source is at least 1024px on shortest side ----
+    # Input image resolution directly determines output quality.
+    # If source is too small, upscale it before sending to remove.bg.
+    _MIN_DIM = 1024
+    try:
+        _src = PILImage.open(source_path).convert('RGBA')
+        _w, _h = _src.size
+        if min(_w, _h) < _MIN_DIM:
+            _scale_up = _MIN_DIM / min(_w, _h)
+            _new_w = int(_w * _scale_up)
+            _new_h = int(_h * _scale_up)
+            _src = _src.resize((_new_w, _new_h), PILImage.LANCZOS)
+            _upscale_buf = _io.BytesIO()
+            _src.save(_upscale_buf, format='PNG')
+            img_bytes = _upscale_buf.getvalue()
+            print(f"[Cutout] Upscaled source from {_w}x{_h} → {_new_w}x{_new_h} before remove.bg")
+        else:
+            with open(source_path, 'rb') as f:
+                img_bytes = f.read()
+            print(f"[Cutout] Source size OK: {_w}x{_h}")
+    except Exception as _e:
+        print(f"[Cutout] Pre-process failed, using raw file: {_e}")
+        with open(source_path, 'rb') as f:
+            img_bytes = f.read()
+
     # ---- METHOD 1: remove.bg API ----
     removebg_key = os.environ.get('REMOVEBG_API_KEY', '')
     if removebg_key:
         try:
-            with open(source_path, 'rb') as f:
-                img_bytes = f.read()
-
             resp = _req.post(
                 'https://api.remove.bg/v1.0/removebg',
                 headers={'X-Api-Key': removebg_key},
@@ -1082,13 +1104,100 @@ def _composite_bottle_on_bg(bottle_cutout, background_img, position='center', sc
     return result.convert('RGB')
 
 
+def _ai_composite_bottle_on_bg(bottle_cutout, background_img, api_key, size='1024x1536', quality='high'):
+    """
+    AI-powered composite: passes both bottle cutout + background to gpt-image-1.5 Edit API.
+    Uses input_fidelity=high so the bottle label/shape is preserved exactly.
+    The model handles lighting match, contact shadows, and surface reflections natively.
+    Returns final PIL Image (RGB), or None if the API call fails.
+    """
+    from PIL import Image as PILImage
+    import io as _io
+    import requests as _req
+    import base64 as _b64
+
+    try:
+        # Convert bottle cutout (RGBA) to PNG bytes — Image 1 (highest fidelity slot)
+        buf1 = _io.BytesIO()
+        bottle_cutout.save(buf1, format='PNG')
+        buf1.seek(0)
+
+        # Convert background (RGBA/RGB) to PNG bytes — Image 2
+        buf2 = _io.BytesIO()
+        background_img.convert('RGBA').save(buf2, format='PNG')
+        buf2.seek(0)
+
+        composite_prompt = (
+            "Image 1 is a bourbon whiskey bottle with a transparent background — "
+            "exact label, shape, colors, and brand markings must be preserved perfectly. "
+            "Image 2 is a dramatic luxury product photography background scene. "
+            "\n\n"
+            "Place the bottle from Image 1 centered vertically on the surface in Image 2. "
+            "Match the bottle's lighting to the scene: use the same light direction, "
+            "color temperature, and highlight placement shown in Image 2. "
+            "Add a soft natural contact shadow directly beneath the bottle base on the surface. "
+            "Add a faint realistic reflection of the bottle on the polished surface below it. "
+            "The bottle glass should pick up subtle color tones from the surrounding environment. "
+            "\n\n"
+            "PRESERVE: The bottle label text, logo, badge, shape, proportions, and liquid color "
+            "must remain 100% identical to Image 1 — do not alter, hallucinate, or regenerate them. "
+            "Do NOT add any extra text, objects, or watermarks. "
+            "Commercial spirits advertisement. Professional product photography. Photorealistic."
+        )
+
+        print(f"[AI Composite] Sending 2-image Edit API call with input_fidelity=high, quality={quality}")
+
+        resp = _req.post(
+            'https://api.openai.com/v1/images/edits',
+            headers={'Authorization': f'Bearer {api_key}'},
+            files=[
+                ('image[]', ('bottle.png', buf1, 'image/png')),
+                ('image[]', ('background.png', buf2, 'image/png')),
+            ],
+            data={
+                'model': 'gpt-image-1.5',
+                'prompt': composite_prompt,
+                'size': size,
+                'quality': quality,
+                'input_fidelity': 'high',
+                'n': '1',
+                'output_format': 'png',
+            },
+            timeout=180
+        )
+
+        if resp.status_code == 200:
+            result = resp.json()
+            img_b64 = result.get('data', [{}])[0].get('b64_json')
+            if img_b64:
+                final = PILImage.open(_io.BytesIO(_b64.b64decode(img_b64))).convert('RGB')
+                print(f"[AI Composite] Success — {final.size}")
+                return final
+            else:
+                print(f"[AI Composite] No image data in response")
+                return None
+        else:
+            try:
+                err = resp.json().get('error', {}).get('message', resp.text[:300])
+            except Exception:
+                err = resp.text[:300]
+            print(f"[AI Composite] Edit API failed ({resp.status_code}): {err}")
+            return None
+
+    except Exception as e:
+        import traceback
+        print(f"[AI Composite] Exception: {traceback.format_exc()}")
+        return None
+
+
 @app.route('/api/ai/generate-image', methods=['POST'])
 def api_generate_image():
     """
     TRUE COMPOSITE: 3-step pipeline for pixel-perfect brand accuracy.
-    Step 1: rembg removes background from hi-res studio photo → exact bottle cutout
+    Step 1: remove.bg removes background from hi-res studio photo → exact bottle cutout
     Step 2: gpt-image-1.5 generates ONLY the background scene (no bottle at all)
-    Step 3: PIL composites real bottle onto AI background with Gaussian shadow
+    Step 3: gpt-image-1.5 Edit API composites bottle into scene with AI lighting/shadows
+    Step 3b: PIL composite fallback if Edit API fails
     Result: 100% accurate bottle/label + beautiful AI backgrounds, social-media ready
     """
     try:
@@ -1212,25 +1321,51 @@ def api_generate_image():
             print(f"[AI Studio] Background generation exception: {e}")
         
         # =====================================================
-        # STEP 3: COMPOSITE BOTTLE ONTO BACKGROUND
+        # STEP 3: AI COMPOSITE — gpt-image-1.5 Edit with both images
+        # Handles lighting match, contact shadows, surface reflections.
+        # Falls back to PIL composite if Edit API fails.
         # =====================================================
         if bottle_cutout and background_img:
+            final = None
+            composite_method = None
+
+            # --- PRIMARY: AI composite via Edit API ---
             try:
-                final = _composite_bottle_on_bg(
+                final = _ai_composite_bottle_on_bg(
                     bottle_cutout, background_img,
-                    position=bottle_position,
-                    scale=float(bottle_scale or 0.72)
+                    api_key=api_key,
+                    size=gpt_size,
+                    quality=quality if quality in ('low', 'medium', 'high') else 'high'
                 )
+                if final:
+                    composite_method = f'ai-composite-edit+rembg ({bottle_type})'
+            except Exception as e:
+                import traceback
+                errors.append(f"AI Composite: {str(e)[:200]}")
+                print(f"[AI Studio] AI composite exception: {traceback.format_exc()}")
+
+            # --- FALLBACK: PIL composite ---
+            if final is None:
+                print(f"[AI Studio] AI composite failed — falling back to PIL composite")
+                try:
+                    final = _composite_bottle_on_bg(
+                        bottle_cutout, background_img,
+                        position=bottle_position,
+                        scale=float(bottle_scale or 0.72)
+                    )
+                    composite_method = f'pil-composite-fallback+rembg ({bottle_type})'
+                except Exception as e:
+                    import traceback
+                    errors.append(f"PIL Composite fallback: {str(e)[:200]}")
+                    print(f"[AI Studio] PIL fallback exception: {traceback.format_exc()}")
+
+            if final:
                 filename = f"ai-composite-{int(time_module.time())}.png"
                 filepath = os.path.join(app.static_folder, 'uploads', filename)
                 final.save(filepath, quality=95, optimize=False)
                 image_url = f"/static/uploads/{filename}"
-                model_used = f'true-composite-rembg+gpt-image-1.5 ({bottle_type})'
-                print(f"[AI Studio] Composite saved: {filepath}")
-            except Exception as e:
-                import traceback
-                errors.append(f"Composite: {str(e)[:200]}")
-                print(f"[AI Studio] Composite exception: {traceback.format_exc()}")
+                model_used = composite_method
+                print(f"[AI Studio] Composite saved ({composite_method}): {filepath}")
         
         # If reference failed but we have a background, save that at minimum
         elif background_img and not bottle_cutout:
