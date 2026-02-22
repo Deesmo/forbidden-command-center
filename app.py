@@ -1581,9 +1581,12 @@ def api_generate_video():
                 'ratio': '720:1280' if data.get('portrait') else '1280:720'  # Runway requires exact strings
             }
             if source_image:
+                # Runway fetches the image from the internet — must be absolute HTTPS URL
+                if source_image.startswith('/'):
+                    source_image = f"https://forbidden-command-center.onrender.com{source_image}"
                 payload['promptImage'] = source_image
 
-            print(f"[Video] Runway {model} — duration={duration}s, image={'yes' if source_image else 'no'}")
+            print(f"[Video] Runway {model} — duration={duration}s, image={'yes' if source_image else 'no'}, url={source_image or 'none'}")
 
             resp = req.post(
                 'https://api.dev.runwayml.com/v1/image_to_video',   # underscore — confirmed in Runway docs
