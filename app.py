@@ -1109,11 +1109,20 @@ def api_generate_image():
                 source_candidates = [
                     os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_57_LightBG_V1.png'),
                     os.path.join(app.static_folder, 'photos', 'gallery', 'Golden_Front_58_LightBG_V1.png'),
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'SingleBarrel1.jpg'),
+                    os.path.join(app.static_folder, 'photos', 'SingleBarrel1.jpg'),
                 ]
             else:
                 source_candidates = [
                     os.path.join(app.static_folder, 'photos', 'gallery', 'Black_Front_LightBG_V1.png'),
+                    os.path.join(app.static_folder, 'photos', 'gallery', 'SmallBatch1.jpg'),
+                    os.path.join(app.static_folder, 'photos', 'SmallBatch1.jpg'),
+                    os.path.join(app.static_folder, 'photos', 'bottle-ref.jpg'),
                 ]
+            
+            # Log all candidates so we can debug path issues in Render logs
+            for c in source_candidates:
+                print(f"[AI Studio] Checking photo: {os.path.basename(c)} — exists: {os.path.exists(c)}")
             
             source_path = next((c for c in source_candidates if os.path.exists(c)), None)
             
@@ -1125,7 +1134,9 @@ def api_generate_image():
                     errors.append(f"Cutout: {str(e)[:200]}")
                     print(f"[AI Studio] Cutout failed: {e}")
             else:
-                errors.append(f"No studio photo found for {bottle_type}")
+                all_paths = [os.path.basename(c) for c in source_candidates]
+                errors.append(f"No studio photo found. Tried: {all_paths}")
+                print(f"[AI Studio] No bottle photo found. Candidates: {source_candidates}")
         
         # =====================================================
         # STEP 2: GENERATE BACKGROUND SCENE (AI, no bottle)
@@ -1281,7 +1292,8 @@ def api_generate_image():
             'revised_prompt': bg_scene_prompt if use_reference else prompt,
             'model': model_used,
             'used_reference': bool(bottle_cutout and background_img),
-            'gallery_id': _save_gallery_id
+            'gallery_id': _save_gallery_id,
+            'debug_errors': errors  # visible in browser devtools network tab
         })
     
     except Exception as e:
