@@ -1104,11 +1104,11 @@ def _composite_bottle_on_bg(bottle_cutout, background_img, position='center', sc
     return result.convert('RGB')
 
 
-def _ai_composite_bottle_on_bg(bottle_cutout, background_img, api_key, size='1024x1536', quality='high'):
+def _ai_composite_bottle_on_bg(bottle_cutout, background_img, api_key, size='1024x1536', quality='high', position='center', scale=0.65):
     """
     AI-powered composite: passes both bottle cutout + background to gpt-image-1.5 Edit API.
     Uses input_fidelity=high so the bottle label/shape is preserved exactly.
-    The model handles lighting match, contact shadows, and surface reflections natively.
+    The model handles lighting match, contact shadows, rim lighting, and surface reflections natively.
     Returns final PIL Image (RGB), or None if the API call fails.
     """
     from PIL import Image as PILImage
@@ -1127,17 +1127,45 @@ def _ai_composite_bottle_on_bg(bottle_cutout, background_img, api_key, size='102
         background_img.convert('RGBA').save(buf2, format='PNG')
         buf2.seek(0)
 
+        # Build position instruction — Rule of Thirds for left/right, centered for center
+        if position == 'left':
+            placement = (
+                "Position the bottle in the LEFT THIRD of the frame, "
+                "leaving generous negative space on the right side for advertising copy. "
+                "The bottle base should sit on the surface at the left third vertical line."
+            )
+        elif position == 'right':
+            placement = (
+                "Position the bottle in the RIGHT THIRD of the frame, "
+                "leaving generous negative space on the left side for advertising copy. "
+                "The bottle base should sit on the surface at the right third vertical line."
+            )
+        else:
+            placement = (
+                "Position the bottle centered horizontally in the frame. "
+                "The bottle base should sit centered on the surface."
+            )
+
+        # Scale instruction
+        scale = max(0.5, min(0.80, float(scale)))
+        scale_pct = int(scale * 100)
+        scale_instruction = f"The bottle should occupy approximately {scale_pct}% of the frame height."
+
         composite_prompt = (
             "Image 1 is a bourbon whiskey bottle with a transparent background — "
             "exact label, shape, colors, and brand markings must be preserved perfectly. "
             "Image 2 is a dramatic luxury product photography background scene. "
             "\n\n"
-            "Place the bottle from Image 1 centered vertically on the surface in Image 2. "
-            "Match the bottle's lighting to the scene: use the same light direction, "
-            "color temperature, and highlight placement shown in Image 2. "
-            "Add a soft natural contact shadow directly beneath the bottle base on the surface. "
-            "Add a faint realistic reflection of the bottle on the polished surface below it. "
-            "The bottle glass should pick up subtle color tones from the surrounding environment. "
+            f"{placement} {scale_instruction} "
+            "The bottle base must rest naturally on the surface — do not float it. "
+            "\n\n"
+            "LIGHTING: Match the bottle's lighting to the scene from Image 2. "
+            "Add bright rim lighting — thin bright highlights running vertically down both "
+            "left and right edges of the bottle glass, characteristic of professional spirits "
+            "studio photography with a vertical softbox. "
+            "The bottle glass should pick up warm ambient color tones from the environment. "
+            "Add a soft natural contact shadow directly beneath the bottle base. "
+            "Add a faint realistic reflection of the bottle on the surface below it. "
             "\n\n"
             "PRESERVE: The bottle label text, logo, badge, shape, proportions, and liquid color "
             "must remain 100% identical to Image 1 — do not alter, hallucinate, or regenerate them. "
@@ -1272,11 +1300,20 @@ def api_generate_image():
         
         # Background prompt: describe the scene WITHOUT any bottle/product
         # The bottle is composited in Step 3 — AI only draws the environment
+        # Add composition hint so negative space aligns with bottle placement
+        if bottle_position == 'left':
+            comp_hint = "Richer background detail on the right side, open negative space on the left third for a product. "
+        elif bottle_position == 'right':
+            comp_hint = "Richer background detail on the left side, open negative space on the right third for a product. "
+        else:
+            comp_hint = "Balanced composition with open negative space in the center foreground for a product. "
+
         bg_scene_prompt = (
             f"{prompt}. "
             "Environment only — no bottles, no products, no objects. "
             "Just the surface, background, and lighting. "
             "Flat polished surface in the foreground for a luxury product to rest on. "
+            f"{comp_hint}"
             "High-end spirits advertisement environment. "
             "Cinematic lighting, rich atmospheric depth. "
             "Shot with 35mm lens, shallow depth of field, moody and dramatic. "
@@ -1335,7 +1372,9 @@ def api_generate_image():
                     bottle_cutout, background_img,
                     api_key=api_key,
                     size=gpt_size,
-                    quality=quality if quality in ('low', 'medium', 'high') else 'high'
+                    quality=quality if quality in ('low', 'medium', 'high') else 'high',
+                    position=bottle_position,
+                    scale=float(bottle_scale or 0.65)
                 )
                 if final:
                     composite_method = f'ai-composite-edit+rembg ({bottle_type})'
