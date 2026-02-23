@@ -1,12 +1,13 @@
 # Forbidden Bourbon Command Center v15b — Gallery + Photos + AI Bottle Ref Fix
 import os
+import re
 import json
 import threading
 import time as time_module
 import random
 from datetime import datetime, timedelta
 from flask import (Flask, render_template, request, jsonify, redirect, 
-                   url_for, flash, send_from_directory)
+                   url_for, flash, send_from_directory, send_file, Response)
 from werkzeug.utils import secure_filename
 
 import database as db
@@ -2095,7 +2096,7 @@ def api_finalize_video():
         except: pass
 
         # Save to gallery
-        final_url = f'/static/uploads/video_final_{uid}.mp4'
+        final_url = f'/api/video/video_final_{uid}.mp4'
         _save_to_gallery('video', final_url, '', '')
 
         return jsonify({'success': True, 'video_url': final_url})
@@ -2142,7 +2143,7 @@ def _auto_add_audio(raw_video_url, duration=10):
             shutil.copy(vid_path, out_path)
             os.remove(vid_path)
             print("[Audio] No ElevenLabs key — saved video without audio")
-            return f'/static/uploads/video_final_{uid}.mp4'
+            return f'/api/video/video_final_{uid}.mp4'
 
         # Step 2: Generate branded ambient SFX via ElevenLabs
         sfx_prompt = (
@@ -2188,7 +2189,7 @@ def _auto_add_audio(raw_video_url, duration=10):
             try: os.remove(p)
             except: pass
 
-        return f'/static/uploads/video_final_{uid}.mp4'
+        return f'/api/video/video_final_{uid}.mp4'
 
     except Exception as e:
         import traceback
@@ -2273,6 +2274,21 @@ def api_clear_cutout_cache():
         return jsonify({'success': True, 'deleted': deleted, 'count': len(deleted)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/video/<path:filename>')
+def serve_video_file(filename):
+    """
+    Serve generated video files with HTTP range request support.
+    Render's static file handler returns 0 bytes for freshly-written MP4s.
+    Flask send_file(conditional=True) uses Werkzeug's built-in range support
+    (206 Partial Content) which fixes both the 0-byte bug and enables seeking.
+    """
+    video_dir = os.path.join(app.static_folder, 'uploads')
+    video_path = os.path.join(video_dir, filename)
+    if not os.path.exists(video_path) or not os.path.isfile(video_path):
+        return jsonify({'error': 'Video not found'}), 404
+    return send_file(video_path, mimetype='video/mp4', conditional=True)
 
 
 @app.route('/api/ai/gallery', methods=['GET'])
