@@ -1554,29 +1554,59 @@ def api_generate_video():
     """
     try:
         data = request.get_json()
-        prompt = data.get('prompt', '')
+        prompt = data.get('prompt', '').strip()
         duration = data.get('duration', 5)
         source_image = data.get('source_image', None)
+        provider = data.get('provider', 'runway')   # 'runway' or 'luma'
+        model = data.get('model', 'gen4_turbo')     # gen4_turbo, gen4.5, veo3.1_fast
+        # Default to portrait (9:16) for Instagram Reels / TikTok / Shorts
+        portrait = data.get('portrait', True)
 
-        # Validate source_image file actually exists on disk (ephemeral filesystem may have wiped it)
-        # Fall back to bottle-ref.jpg which is committed to the repo and always available
-        # Handle both relative (/static/...) and absolute (https://domain/static/...) URLs
+        # ── SOURCE IMAGE: prefer clean isolated bottle shots, avoid pre-composed lifestyle images ──
+        # Priority: SmallBatch1.jpg > Black_Front_LightBG_V1.png > bottle-ref.jpg
+        _clean_bottle_candidates = [
+            '/static/photos/SmallBatch1.jpg',
+            '/static/photos/gallery/SmallBatch1.jpg',
+            '/static/photos/gallery/Black_Front_LightBG_V1.png',
+            '/static/photos/bottle-ref.jpg',
+        ]
+        _base_url = 'https://forbidden-command-center.onrender.com'
+
+        # Validate any frontend-supplied source_image — strip domain, check file exists
         if source_image:
-            _base = 'https://forbidden-command-center.onrender.com'
             _rel = source_image
-            if _rel.startswith(_base):
-                _rel = _rel[len(_base):]  # strip domain to get relative path
+            if _rel.startswith(_base_url):
+                _rel = _rel[len(_base_url):]
             if _rel.startswith('/static/'):
                 _abs = os.path.join(app.static_folder, _rel[len('/static/'):])
                 if not os.path.exists(_abs):
-                    print(f"[Video] source_image {source_image} not found on disk, falling back to bottle-ref.jpg")
-                    source_image = '/static/photos/bottle-ref.jpg'
+                    print(f"[Video] source_image {source_image} not found on disk — will select best bottle photo")
+                    source_image = None  # fall through to auto-select below
 
-        provider = data.get('provider', 'runway')   # 'runway' or 'luma'
-        model = data.get('model', 'gen4_turbo')     # gen4_turbo, gen4.5, veo3.1_fast
+        # Auto-select best available clean bottle photo
+        if not source_image:
+            for _candidate in _clean_bottle_candidates:
+                _abs = os.path.join(app.static_folder, _candidate[len('/static/'):])
+                if os.path.exists(_abs):
+                    source_image = _candidate
+                    print(f"[Video] Auto-selected source image: {source_image}")
+                    break
 
-        if not prompt:
-            return jsonify({'success': False, 'error': 'Prompt required'}), 400
+        # ── PROMPT: inject brand-specific camera-motion prompt if frontend sends generic/empty ──
+        _DEFAULT_VIDEO_PROMPT = (
+            "Slow cinematic dolly push-in toward the Forbidden Bourbon bottle, "
+            "camera moves steadily forward and slightly upward revealing the full bottle, "
+            "warm amber bokeh background, dramatic side lighting catching the faceted glass, "
+            "luxury spirits commercial, no camera shake, no pouring, bottle stays fully in frame"
+        )
+        if not prompt or len(prompt) < 20:
+            prompt = _DEFAULT_VIDEO_PROMPT
+            print(f"[Video] Using default brand prompt")
+        else:
+            # Append camera constraint to any user prompt to prevent pour/zoom-crop issues
+            if 'pour' not in prompt.lower() and 'no pour' not in prompt.lower():
+                prompt = prompt + ", no liquid pouring, camera stays on full bottle, bottle stays fully in frame"
+            print(f"[Video] Using user prompt (enhanced)")
 
         import requests as req
 
@@ -1593,7 +1623,7 @@ def api_generate_video():
                 'promptText': prompt,
                 'model': model,
                 'duration': duration,
-                'ratio': '720:1280' if data.get('portrait') else '1280:720'  # Runway requires exact strings
+                'ratio': '720:1280' if portrait else '1280:720'  # portrait=True by default for social
             }
             if source_image:
                 # Runway fetches the image from the internet — must be absolute HTTPS URL
@@ -1638,7 +1668,7 @@ def api_generate_video():
             payload = {
                 'prompt': prompt,
                 'model': luma_model,
-                'aspect_ratio': '9:16' if data.get('portrait') else '16:9',
+                'aspect_ratio': '9:16' if portrait else '16:9',
                 'duration': '5s'
             }
             if source_image:
