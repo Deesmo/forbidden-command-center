@@ -2067,6 +2067,94 @@ def api_finalize_video():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _auto_add_audio(raw_video_url, duration=10):
+    """
+    Download a Runway/Luma CDN video, generate a branded ambient SFX track via
+    ElevenLabs, mux them with ffmpeg, and return a local /static/uploads/ URL.
+    Falls back to the original CDN URL if ElevenLabs key missing or any step fails.
+    """
+    import requests as req
+    import subprocess
+    import uuid
+
+    el_key = get_api_key('elevenlabs')
+    uploads_dir = os.path.join(app.static_folder, 'uploads')
+    os.makedirs(uploads_dir, exist_ok=True)
+    uid = uuid.uuid4().hex[:10]
+
+    try:
+        # Step 1: Download video from CDN
+        vid_path = os.path.join(uploads_dir, f'vid_raw_{uid}.mp4')
+        with req.get(raw_video_url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(vid_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    f.write(chunk)
+        print(f"[Audio] Downloaded video: {os.path.getsize(vid_path)//1024}KB")
+
+        out_path = os.path.join(uploads_dir, f'video_final_{uid}.mp4')
+
+        if not el_key:
+            # No ElevenLabs key — still save locally for persistent storage
+            import shutil
+            shutil.copy(vid_path, out_path)
+            os.remove(vid_path)
+            print("[Audio] No ElevenLabs key — saved video without audio")
+            return f'/static/uploads/video_final_{uid}.mp4'
+
+        # Step 2: Generate branded ambient SFX via ElevenLabs
+        sfx_prompt = (
+            "Deep cinematic bourbon ambience — low resonant barrel hum, faint crackling fireplace, "
+            "subtle ambient whiskey atmosphere, moody luxury spirits commercial background, no music"
+        )
+        sfx_resp = req.post(
+            'https://api.elevenlabs.io/v1/sound-generation',
+            headers={'xi-api-key': el_key, 'Content-Type': 'application/json'},
+            json={
+                'text': sfx_prompt,
+                'duration_seconds': min(float(duration), 30),
+                'prompt_influence': 0.4,
+                'model_id': 'eleven_text_to_sound_v2'
+            },
+            timeout=60
+        )
+        sfx_resp.raise_for_status()
+        sfx_path = os.path.join(uploads_dir, f'sfx_{uid}.mp3')
+        with open(sfx_path, 'wb') as f:
+            f.write(sfx_resp.content)
+        print(f"[Audio] SFX generated: {os.path.getsize(sfx_path)//1024}KB")
+
+        # Step 3: Mux video + audio with ffmpeg (-shortest trims audio to video length)
+        result = subprocess.run([
+            'ffmpeg', '-y',
+            '-i', vid_path,
+            '-stream_loop', '-1', '-i', sfx_path,
+            '-c:v', 'copy', '-c:a', 'aac',
+            '-map', '0:v:0', '-map', '1:a:0',
+            '-shortest', out_path
+        ], capture_output=True, text=True, timeout=120)
+
+        if result.returncode != 0:
+            print(f"[Audio] ffmpeg error: {result.stderr[-300:]}")
+            import shutil
+            shutil.copy(vid_path, out_path)  # fallback: save without audio
+
+        print(f"[Audio] Final video: {os.path.getsize(out_path)//1024}KB")
+
+        # Cleanup temps
+        for p in [vid_path, sfx_path]:
+            try: os.remove(p)
+            except: pass
+
+        return f'/static/uploads/video_final_{uid}.mp4'
+
+    except Exception as e:
+        import traceback
+        print(f"[Audio] Auto-audio failed: {traceback.format_exc()}")
+        # Best-effort: return CDN URL unchanged so video still works, just silent
+        return raw_video_url
+
+
 @app.route('/api/ai/video-status/<task_id>', methods=['GET'])
 def api_video_status(task_id):
     """Check video generation status — supports Runway and Luma"""
@@ -2091,6 +2179,8 @@ def api_video_status(task_id):
                     output = result.get('output', [])
                     if output:
                         video_url = output[0] if isinstance(output, list) else output
+                        # Auto-add ElevenLabs ambient audio + save locally
+                        video_url = _auto_add_audio(video_url, duration=10)
                     _save_to_gallery('video', video_url, '', '')
                 return jsonify({'status': status, 'video_url': video_url, 'error': result.get('failure', None)})
             else:
@@ -2113,6 +2203,8 @@ def api_video_status(task_id):
                 if status == 'SUCCEEDED':
                     video_url = result.get('assets', {}).get('video')
                     if video_url:
+                        # Auto-add ElevenLabs ambient audio + save locally
+                        video_url = _auto_add_audio(video_url, duration=5)
                         _save_to_gallery('video', video_url, '', '')
                 return jsonify({'status': status, 'video_url': video_url, 'error': result.get('failure_reason', None)})
             else:
