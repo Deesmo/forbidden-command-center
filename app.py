@@ -1545,34 +1545,51 @@ def api_generate_image():
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
 
 
-def _maybe_resize_for_runway(abs_path, rel_url, max_px=1920):
+def _maybe_resize_for_runway(abs_path, rel_url, portrait=True, max_px=1280):
     """
-    If the image at abs_path is wider or taller than max_px, resize it and save
-    a _runway_thumb version. Returns the relative URL (/static/...) to serve.
-    Runway rejects images >20MB — high-res shots like 6000x9000 always fail.
+    Crop to target aspect ratio (9:16 portrait or 16:9 landscape) then scale to max_px.
+    Runway requires both dimensions < 8000px and aspect ratio 0.5–2.0.
+    We normalise every source image to exactly 720×1280 (portrait) or 1280×720 (landscape)
+    so Runway always gets a pixel-perfect match for the requested ratio.
     """
     try:
         from PIL import Image as _PILImage
-        img = _PILImage.open(abs_path)
-        w, h = img.size
-        if max(w, h) <= max_px:
-            return rel_url  # already small enough, use as-is
-
-        # Scale down maintaining aspect ratio
-        scale = max_px / max(w, h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        img = img.resize((new_w, new_h), _PILImage.LANCZOS)
-
-        # Save resized version next to original
         import hashlib
+        img = _PILImage.open(abs_path).convert('RGB')
+        w, h = img.size
+
+        # Target dimensions
+        if portrait:
+            tgt_w, tgt_h = 720, 1280
+        else:
+            tgt_w, tgt_h = 1280, 720
+        tgt_ratio = tgt_w / tgt_h  # 0.5625 for portrait
+
+        # Centre-crop to target aspect ratio
+        src_ratio = w / h
+        if abs(src_ratio - tgt_ratio) > 0.01:
+            if src_ratio > tgt_ratio:
+                # Source is wider — crop width
+                new_w = int(h * tgt_ratio)
+                x0 = (w - new_w) // 2
+                img = img.crop((x0, 0, x0 + new_w, h))
+            else:
+                # Source is taller — crop height
+                new_h = int(w / tgt_ratio)
+                y0 = (h - new_h) // 2
+                img = img.crop((0, y0, w, y0 + new_h))
+            print(f"[Runway] Cropped {w}x{h} → {img.size[0]}x{img.size[1]} (ratio {tgt_ratio:.3f})")
+
+        # Scale to exact target size
+        img = img.resize((tgt_w, tgt_h), _PILImage.LANCZOS)
+
+        # Save thumb
         thumb_name = 'runway_thumb_' + hashlib.md5(abs_path.encode()).hexdigest()[:8] + '.jpg'
         thumb_abs = os.path.join(os.path.dirname(abs_path), thumb_name)
-        img.convert('RGB').save(thumb_abs, 'JPEG', quality=88, optimize=True)
+        img.save(thumb_abs, 'JPEG', quality=88, optimize=True)
 
-        # Build relative URL
-        static_folder = abs_path[:abs_path.index('/static/') + 1]
         thumb_rel = '/static/' + thumb_abs[thumb_abs.index('static/') + 7:]
-        print(f"[Runway] Resized {w}x{h} → {new_w}x{new_h} for promptImage: {thumb_rel}")
+        print(f"[Runway] Ready for Runway: {tgt_w}x{tgt_h} → {thumb_rel}")
         return thumb_rel
     except Exception as e:
         print(f"[Runway] Resize failed ({e}), using original")
@@ -1671,14 +1688,25 @@ def api_generate_video():
                 'ratio': '720:1280' if portrait else '1280:720'  # portrait=True by default for social
             }
             if source_image:
-                # Runway fetches the image from the internet — must be absolute HTTPS URL
-                # Also resize to max 1920px longest side — Runway rejects images >20MB
-                # and high-res files (like 6000x9000) will always fail validation
-                if source_image.startswith('/'):
-                    _img_abs = os.path.join(app.static_folder, source_image[len('/static/'):])
-                    _resized_url = _maybe_resize_for_runway(_img_abs, source_image)
-                    source_image = f"https://forbidden-command-center.onrender.com{_resized_url}"
-                payload['promptImage'] = source_image
+                # Normalise to relative path (/static/...) regardless of whether frontend
+                # sent a full URL or a relative path — then crop+resize for Runway
+                _base = 'https://forbidden-command-center.onrender.com'
+                _rel = source_image
+                if _rel.startswith(_base):
+                    _rel = _rel[len(_base):]
+                if _rel.startswith('/static/'):
+                    _img_abs = os.path.join(app.static_folder, _rel[len('/static/'):])
+                    if os.path.exists(_img_abs):
+                        _resized_rel = _maybe_resize_for_runway(_img_abs, _rel, portrait=portrait)
+                        source_image = f"{_base}{_resized_rel}"
+                    else:
+                        print(f"[Runway] Source image not found on disk: {_img_abs}")
+                        source_image = None
+                else:
+                    # External URL — can't resize, send as-is
+                    print(f"[Runway] External source image URL, sending as-is: {source_image[:80]}")
+                if source_image:
+                    payload['promptImage'] = source_image
 
             print(f"[Video] Runway {model} — duration={duration}s, image={'yes' if source_image else 'no'}, url={source_image or 'none'}")
 
