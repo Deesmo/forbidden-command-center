@@ -59,7 +59,7 @@ def handle_exception(e):
 # API key helper - checks env vars first, then database
 def get_api_key(provider):
     """Get API key from env var first, then database. Set once in Render, works everywhere."""
-    env_map = {'openai': 'OPENAI_API_KEY', 'runway': 'RUNWAY_API_KEY'}
+    env_map = {'openai': 'OPENAI_API_KEY', 'runway': 'RUNWAY_API_KEY', 'elevenlabs': 'ELEVENLABS_API_KEY'}
     env_key = os.environ.get(env_map.get(provider, ''), '')
     if env_key:
         return env_key
@@ -1545,6 +1545,40 @@ def api_generate_image():
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
 
 
+def _maybe_resize_for_runway(abs_path, rel_url, max_px=1920):
+    """
+    If the image at abs_path is wider or taller than max_px, resize it and save
+    a _runway_thumb version. Returns the relative URL (/static/...) to serve.
+    Runway rejects images >20MB — high-res shots like 6000x9000 always fail.
+    """
+    try:
+        from PIL import Image as _PILImage
+        img = _PILImage.open(abs_path)
+        w, h = img.size
+        if max(w, h) <= max_px:
+            return rel_url  # already small enough, use as-is
+
+        # Scale down maintaining aspect ratio
+        scale = max_px / max(w, h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = img.resize((new_w, new_h), _PILImage.LANCZOS)
+
+        # Save resized version next to original
+        import hashlib
+        thumb_name = 'runway_thumb_' + hashlib.md5(abs_path.encode()).hexdigest()[:8] + '.jpg'
+        thumb_abs = os.path.join(os.path.dirname(abs_path), thumb_name)
+        img.convert('RGB').save(thumb_abs, 'JPEG', quality=88, optimize=True)
+
+        # Build relative URL
+        static_folder = abs_path[:abs_path.index('/static/') + 1]
+        thumb_rel = '/static/' + thumb_abs[thumb_abs.index('static/') + 7:]
+        print(f"[Runway] Resized {w}x{h} → {new_w}x{new_h} for promptImage: {thumb_rel}")
+        return thumb_rel
+    except Exception as e:
+        print(f"[Runway] Resize failed ({e}), using original")
+        return rel_url
+
+
 @app.route('/api/ai/generate-video', methods=['POST'])
 def api_generate_video():
     """
@@ -1561,15 +1595,26 @@ def api_generate_video():
         model = data.get('model', 'gen4_turbo')     # gen4_turbo, gen4.5, veo3.1_fast
         # Default to portrait (9:16) for Instagram Reels / TikTok / Shorts
         portrait = data.get('portrait', True)
+        bottle_type = data.get('bottle_type', 'small_batch')  # 'small_batch' or 'single_barrel'
 
         # ── SOURCE IMAGE: prefer clean isolated bottle shots, avoid pre-composed lifestyle images ──
-        # Priority: SmallBatch1.jpg > Black_Front_LightBG_V1.png > bottle-ref.jpg
-        _clean_bottle_candidates = [
-            '/static/photos/SmallBatch1.jpg',
-            '/static/photos/gallery/SmallBatch1.jpg',
-            '/static/photos/gallery/Black_Front_LightBG_V1.png',
-            '/static/photos/bottle-ref.jpg',
-        ]
+        # Small Batch (copper): SmallBatch1.jpg > Black_Front_LightBG_V1.png > bottle-ref.jpg
+        # Single Barrel (gold): Golden_Front_57 > Golden_Front_58 > SingleBarrel1.jpg
+        if bottle_type == 'single_barrel':
+            _clean_bottle_candidates = [
+                '/static/photos/gallery/Golden_Front_57_LightBG_V1.png',
+                '/static/photos/gallery/Golden_Front_58_LightBG_V1.png',
+                '/static/photos/gallery/SingleBarrel1.jpg',
+                '/static/photos/SingleBarrel1.jpg',
+                '/static/photos/bottle-ref.jpg',
+            ]
+        else:
+            _clean_bottle_candidates = [
+                '/static/photos/SmallBatch1.jpg',
+                '/static/photos/gallery/SmallBatch1.jpg',
+                '/static/photos/gallery/Black_Front_LightBG_V1.png',
+                '/static/photos/bottle-ref.jpg',
+            ]
         _base_url = 'https://forbidden-command-center.onrender.com'
 
         # Validate any frontend-supplied source_image — strip domain, check file exists
@@ -1627,8 +1672,12 @@ def api_generate_video():
             }
             if source_image:
                 # Runway fetches the image from the internet — must be absolute HTTPS URL
+                # Also resize to max 1920px longest side — Runway rejects images >20MB
+                # and high-res files (like 6000x9000) will always fail validation
                 if source_image.startswith('/'):
-                    source_image = f"https://forbidden-command-center.onrender.com{source_image}"
+                    _img_abs = os.path.join(app.static_folder, source_image[len('/static/'):])
+                    _resized_url = _maybe_resize_for_runway(_img_abs, source_image)
+                    source_image = f"https://forbidden-command-center.onrender.com{_resized_url}"
                 payload['promptImage'] = source_image
 
             print(f"[Video] Runway {model} — duration={duration}s, image={'yes' if source_image else 'no'}, url={source_image or 'none'}")
@@ -1651,7 +1700,13 @@ def api_generate_video():
                 return jsonify({'success': True, 'task_id': task_id, 'provider': 'runway'})
             else:
                 try:
-                    error_msg = resp.json().get('error', resp.text[:300])
+                    _err_body = resp.json()
+                    error_msg = _err_body.get('error', resp.text[:300])
+                    # Include 'issues' array for detailed validation errors
+                    _issues = _err_body.get('issues', [])
+                    if _issues:
+                        _detail = ' | '.join(i.get('message', '') for i in _issues)
+                        error_msg = f"{error_msg}: {_detail}"
                 except Exception:
                     error_msg = resp.text[:300]
                 print(f"[Video] Runway failed ({resp.status_code}): {error_msg}")
@@ -1708,6 +1763,270 @@ def api_generate_video():
         import traceback
         print(f"[Video] Exception: {traceback.format_exc()}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ai/templates', methods=['GET'])
+def api_ai_templates():
+    """Return all video and image prompt templates for the AI Studio."""
+    video_templates = [
+        # ── ORIGINAL 6 (kept for reference) ─────────────────────────────
+        {'id': 'v_product_hero', 'label': 'Product Hero', 'category': 'product',
+         'prompt': 'Slow cinematic dolly push-in toward the Forbidden Bourbon bottle, warm amber bokeh background, dramatic side lighting catching the faceted glass, luxury spirits commercial, no pouring, bottle stays fully in frame'},
+        {'id': 'v_orbit', 'label': 'Bottle Orbit', 'category': 'product',
+         'prompt': 'Slow 180-degree orbit around Forbidden Bourbon bottle, camera level with label, dark moody background with rim lighting, luxury product reveal, smooth motion, no camera shake'},
+        {'id': 'v_lifestyle', 'label': 'Lifestyle Pour', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle in foreground, blurred speakeasy bar in background, warm candlelight, cinematic shallow depth of field, camera gently drifts left to right'},
+        {'id': 'v_barrel', 'label': 'Barrel Room', 'category': 'heritage',
+         'prompt': 'Camera slowly pulls back from close-up of Forbidden Bourbon label to reveal a dark Kentucky rickhouse full of aging barrels, warm amber shafts of light through wood slats, dramatic and cinematic'},
+        {'id': 'v_fire', 'label': 'Fireplace Glow', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle resting on a stone hearth, firelight flickering warm reflections across the faceted glass, intimate luxury scene, slow gentle camera drift, no pouring'},
+        {'id': 'v_smoke', 'label': 'Smokehouse', 'category': 'product',
+         'prompt': 'Forbidden Bourbon bottle surrounded by thin wisps of oak smoke drifting past in slow motion, jet black background, single dramatic spotlight from above, cinematic and moody'},
+        # ── NEW 10 ────────────────────────────────────────────────────────
+        {'id': 'v_gold_hero', 'label': 'Gold Edition Hero', 'category': 'product',
+         'prompt': 'Gold Forbidden Bourbon Single Barrel bottle, slow dramatic push-in, jet black background with warm single overhead spotlight casting deep shadows on the faceted gold glass, luxury whiskey commercial'},
+        {'id': 'v_whiskey_neat', 'label': 'Whiskey Neat', 'category': 'lifestyle',
+         'prompt': 'Extreme close-up of a filled crystal rocks glass with golden bourbon, slow ripple across the amber liquid surface, Forbidden Bourbon bottle in soft bokeh behind, warm intimate lighting'},
+        {'id': 'v_kentucky_sunrise', 'label': 'Kentucky Sunrise', 'category': 'heritage',
+         'prompt': 'Forbidden Bourbon bottle silhouetted against a hazy golden sunrise over rolling Kentucky hills, slow cinematic push-in, warm orange sky, mist in the valleys below, epic and emotional'},
+        {'id': 'v_copper_ice', 'label': 'Copper & Ice', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon copper bottle beside a crystal glass with a single large perfectly clear ice cube, slow fog drift across the marble table surface, cool blue-and-amber contrast lighting'},
+        {'id': 'v_vault', 'label': 'Vault Door Reveal', 'category': 'brand',
+         'prompt': 'Dramatic reveal: heavy antique vault door swings slowly open from the left, revealing Forbidden Bourbon bottle bathed in warm golden light from behind, theatrical and cinematic'},
+        {'id': 'v_label_macro', 'label': 'Label Macro Study', 'category': 'product',
+         'prompt': 'Ultra-tight macro lens slowly racking focus across the FORBIDDEN label — first the engraved text, then the wax seal, then the bourbon color in the glass — cinematic depth of field pull'},
+        {'id': 'v_award_shelf', 'label': 'Award Shelf', 'category': 'brand',
+         'prompt': 'Forbidden Bourbon bottle displayed on a dark velvet shelf with Double Gold and Gold medal badges visible, camera slowly orbits the bottle, warm museum-quality spotlighting, prestigious and confident'},
+        {'id': 'v_social_reel', 'label': 'Social Reel (Portrait)', 'category': 'social',
+         'prompt': 'Vertical portrait format — Forbidden Bourbon bottle centered in frame, dramatic neon-and-candlelight bar background, slow zoom out revealing the full bottle, bold cinematic color grade for Instagram Reels'},
+        {'id': 'v_two_bottle', 'label': 'Two Bottles Side by Side', 'category': 'brand',
+         'prompt': 'Forbidden Bourbon Small Batch (copper) and Single Barrel (gold) bottles standing side by side, slow zoom out symmetrically revealing both, dark background with matching spotlight on each bottle'},
+        {'id': 'v_old_fashioned', 'label': 'Old Fashioned Moment', 'category': 'lifestyle',
+         'prompt': 'A perfect Old Fashioned cocktail in a crystal glass with orange peel garnish and cherry, Forbidden Bourbon bottle slightly behind and to the right in bokeh, warm amber bar lighting, slow drift right'},
+    ]
+
+    image_templates = [
+        # ── ORIGINAL 6 ────────────────────────────────────────────────────
+        {'id': 'i_product', 'label': 'Product Hero', 'category': 'product',
+         'prompt': 'Professional product photography of Forbidden Bourbon bottle, dramatic studio lighting, black background, rim lighting highlighting the faceted glass, luxury whiskey brand aesthetic'},
+        {'id': 'i_lifestyle', 'label': 'Lifestyle Scene', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle in an upscale bar setting, warm amber lighting, crystal glassware, bokeh background, editorial luxury spirits photography'},
+        {'id': 'i_artdeco', 'label': 'Art Deco Poster', 'category': 'brand',
+         'prompt': 'Art Deco prohibition era poster featuring Forbidden Bourbon, gold and navy geometric design, 1920s speakeasy aesthetic, vintage letterpress typography'},
+        {'id': 'i_cocktail', 'label': 'Cocktail Hero', 'category': 'lifestyle',
+         'prompt': 'Old fashioned cocktail with Forbidden Bourbon, garnished with orange twist and cherry, crystal rocks glass, warm candlelight, lifestyle spirits photography'},
+        {'id': 'i_social', 'label': 'Social Ad', 'category': 'social',
+         'prompt': 'Bold Instagram-ready graphic with Forbidden Bourbon bottle, dramatic lighting, text space for overlay, vibrant yet sophisticated color palette, social media advertising aesthetic'},
+        {'id': 'i_editorial', 'label': 'Editorial', 'category': 'editorial',
+         'prompt': 'Editorial whiskey photography — Forbidden Bourbon bottle with dramatic chiaroscuro lighting, artistic composition, magazine-quality depth and texture'},
+        # ── NEW 20 ────────────────────────────────────────────────────────
+        {'id': 'i_gold_hero', 'label': 'Gold Edition Hero', 'category': 'product',
+         'prompt': 'Forbidden Bourbon Single Barrel gold bottle, jet black background, single dramatic overhead spotlight, deep dramatic shadows, ultra-sharp product photography, luxury spirits'},
+        {'id': 'i_two_bottle', 'label': 'Two Bottles Comparison', 'category': 'brand',
+         'prompt': 'Forbidden Bourbon Small Batch (copper) and Single Barrel (gold) bottles side by side, perfectly matched studio lighting, symmetrical composition, luxury brand photography'},
+        {'id': 'i_limestone', 'label': 'Kentucky Limestone', 'category': 'heritage',
+         'prompt': 'Forbidden Bourbon bottle resting on rough Kentucky limestone rock, spring bluegrass and wildflowers out of focus behind, golden hour light, rustic luxury outdoor photography'},
+        {'id': 'i_nightcap', 'label': 'Night Cap', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle and crystal rocks glass on a dark leather-top mahogany desk, single warm desk lamp illuminating the scene, masculine editorial lifestyle photography'},
+        {'id': 'i_gift', 'label': 'Gift Box Flat Lay', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle overhead flat lay on dark velvet surface with elegant gift wrap, gold ribbon, and a handwritten note card, holiday gifting photography'},
+        {'id': 'i_bardstown', 'label': 'Bardstown Heritage', 'category': 'heritage',
+         'prompt': 'Forbidden Bourbon bottle with a faded vintage map of Bardstown Kentucky as a background texture, aged editorial treatment, bourbon capital of the world heritage aesthetic'},
+        {'id': 'i_story_bold', 'label': 'Bold Story Graphic', 'category': 'social',
+         'prompt': 'Vertical 9:16 bold typography social graphic — "Double Gold. Single Barrel. Zero Compromise." text with Forbidden Bourbon bottle, dark dramatic background, Instagram story format'},
+        {'id': 'i_fall', 'label': 'Fall Season', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle surrounded by autumn maple and oak leaves on a weathered wood surface, warm golden-hour side light, fall harvest season lifestyle photography'},
+        {'id': 'i_smoke_studio', 'label': 'Smoke Studio', 'category': 'product',
+         'prompt': 'Forbidden Bourbon bottle in a professional studio with wisps of real oak smoke drifting across the scene, single overhead dramatic spotlight, black background, cinematic product photography'},
+        {'id': 'i_speakeasy', 'label': 'Speakeasy Scene', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle on a vintage brass bar rail in a dimly lit 1920s speakeasy, low candles, pressed tin ceiling, dark wood, moody prohibition era atmosphere'},
+        {'id': 'i_cheers', 'label': 'Cheers Moment', 'category': 'lifestyle',
+         'prompt': 'Two crystal rocks glasses clinking with Forbidden Bourbon, warm bokeh bar background, celebratory lifestyle photography, friendship and luxury'},
+        {'id': 'i_macro_label', 'label': 'Label Macro', 'category': 'product',
+         'prompt': 'Extreme macro close-up of the FORBIDDEN label — sharp focus on the engraved letterpress text and wax seal, shallow depth of field blurring the bottle edges, fine detail product photography'},
+        {'id': 'i_winter', 'label': 'Winter Warmth', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle beside a fireplace with a fur throw and a filled crystal glass, snow visible through a frosted window behind, cozy luxury winter scene'},
+        {'id': 'i_dark_editorial', 'label': 'Dark Editorial', 'category': 'editorial',
+         'prompt': 'High contrast black and white editorial photography of Forbidden Bourbon bottle, dramatic chiaroscuro lighting, artistic magazine-quality composition, noir aesthetic'},
+        {'id': 'i_kentucky_field', 'label': 'Kentucky Field', 'category': 'heritage',
+         'prompt': 'Forbidden Bourbon bottle standing in a Kentucky bluegrass field at golden hour, rolling hills and a white fence in the soft background, authentic bourbon country heritage photography'},
+        {'id': 'i_awards', 'label': 'Awards Showcase', 'category': 'brand',
+         'prompt': 'Forbidden Bourbon bottle prominently displayed with Double Gold (NYISC) and Gold (SFWSC) medal badges arranged artistically, museum lighting, prestigious and confident brand photography'},
+        {'id': 'i_cocktail_making', 'label': 'Bartender Craft', 'category': 'lifestyle',
+         'prompt': 'Bartender hands muddling an Old Fashioned with Forbidden Bourbon bottle visible on the back bar, warm bar lighting, craft cocktail making in action, editorial lifestyle photography'},
+        {'id': 'i_gifting_duo', 'label': 'Gifting Duo', 'category': 'lifestyle',
+         'prompt': 'Both Forbidden Bourbon bottles (copper Small Batch and gold Single Barrel) as a gift set in a dark luxury box with tissue paper, premium gift photography for holiday campaigns'},
+    ]
+
+    return jsonify({'success': True, 'video': video_templates, 'image': image_templates})
+
+
+@app.route('/api/ai/finalize-video', methods=['POST'])
+def api_finalize_video():
+    """
+    Download a generated video from CDN and optionally layer audio (SFX, music, voiceover)
+    using ElevenLabs + ffmpeg, then return a locally-stored file URL.
+
+    Request body:
+    {
+      "video_url": "https://runway-cdn.../video.mp4",
+      "duration": 10,
+      "sfx":       { "enabled": true, "prompt": "..." },
+      "music":     { "enabled": true, "prompt": "..." },
+      "voiceover": { "enabled": true, "text": "...", "voice_id": "..." }
+    }
+    """
+    import requests as req
+    import subprocess
+    import uuid
+    import tempfile
+
+    try:
+        data = request.get_json()
+        video_url = data.get('video_url', '').strip()
+        duration  = int(data.get('duration', 10))
+        sfx_opts  = data.get('sfx', {})
+        music_opts= data.get('music', {})
+        vo_opts   = data.get('voiceover', {})
+
+        if not video_url:
+            return jsonify({'success': False, 'error': 'video_url required'}), 400
+
+        el_key = get_api_key('elevenlabs')
+        audio_requested = (
+            sfx_opts.get('enabled') or
+            music_opts.get('enabled') or
+            vo_opts.get('enabled')
+        )
+        if audio_requested and not el_key:
+            return jsonify({'success': False, 'error': 'ELEVENLABS_API_KEY not set in Render env vars'}), 400
+
+        uid = uuid.uuid4().hex[:10]
+        uploads_dir = os.path.join(app.static_folder, 'uploads')
+        os.makedirs(uploads_dir, exist_ok=True)
+
+        # ── Step 1: Download the video from Runway/Luma CDN ────────────────
+        print(f"[Finalize] Downloading video: {video_url[:80]}...")
+        vid_path = os.path.join(uploads_dir, f'vid_raw_{uid}.mp4')
+        with req.get(video_url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(vid_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    f.write(chunk)
+        print(f"[Finalize] Video downloaded: {os.path.getsize(vid_path)//1024}KB")
+
+        # ── Step 2: Generate audio layers via ElevenLabs ────────────────────
+        el_headers = {'xi-api-key': el_key, 'Content-Type': 'application/json'}
+        audio_paths = []
+
+        def _generate_sfx(prompt, dur):
+            """Call ElevenLabs sound-generation endpoint, return path to mp3."""
+            resp = req.post(
+                'https://api.elevenlabs.io/v1/sound-generation',
+                headers=el_headers,
+                json={
+                    'text': prompt,
+                    'duration_seconds': min(float(dur), 30),
+                    'prompt_influence': 0.5,
+                    'model_id': 'eleven_text_to_sound_v2'
+                },
+                timeout=60
+            )
+            resp.raise_for_status()
+            path = os.path.join(uploads_dir, f'audio_{uuid.uuid4().hex[:8]}.mp3')
+            with open(path, 'wb') as f:
+                f.write(resp.content)
+            print(f"[Finalize] Audio generated: {os.path.getsize(path)//1024}KB — {prompt[:50]}")
+            return path
+
+        def _generate_tts(text, voice_id):
+            """Call ElevenLabs TTS endpoint, return path to mp3."""
+            vid = voice_id or '2EiwWnXFnvU5JabPnv8n'  # default: Clyde (warm male, suits bourbon brand)
+            resp = req.post(
+                f'https://api.elevenlabs.io/v1/text-to-speech/{vid}',
+                headers=el_headers,
+                json={
+                    'text': text,
+                    'model_id': 'eleven_turbo_v2_5',
+                    'voice_settings': {'stability': 0.5, 'similarity_boost': 0.75}
+                },
+                timeout=60
+            )
+            resp.raise_for_status()
+            path = os.path.join(uploads_dir, f'vo_{uuid.uuid4().hex[:8]}.mp3')
+            with open(path, 'wb') as f:
+                f.write(resp.content)
+            print(f"[Finalize] Voiceover generated: {os.path.getsize(path)//1024}KB")
+            return path
+
+        if sfx_opts.get('enabled') and sfx_opts.get('prompt', '').strip():
+            audio_paths.append(('sfx', _generate_sfx(sfx_opts['prompt'], duration)))
+
+        if music_opts.get('enabled') and music_opts.get('prompt', '').strip():
+            # Music uses the same SFX endpoint — describe ambient music in the prompt
+            audio_paths.append(('music', _generate_sfx(music_opts['prompt'], duration)))
+
+        if vo_opts.get('enabled') and vo_opts.get('text', '').strip():
+            audio_paths.append(('voiceover', _generate_tts(vo_opts['text'], vo_opts.get('voice_id', ''))))
+
+        # ── Step 3: Mux video + audio with ffmpeg ───────────────────────────
+        out_path = os.path.join(uploads_dir, f'video_final_{uid}.mp4')
+
+        if not audio_paths:
+            # No audio — just copy the downloaded file as-is
+            import shutil
+            shutil.copy(vid_path, out_path)
+            print(f"[Finalize] No audio — copied video directly")
+        else:
+            # Build ffmpeg command dynamically for 1–3 audio inputs
+            cmd = ['ffmpeg', '-y', '-i', vid_path]
+            for _, ap in audio_paths:
+                cmd += ['-stream_loop', '-1', '-i', ap]
+
+            n = len(audio_paths)
+            if n == 1:
+                # Single audio track — simplest case
+                cmd += ['-c:v', 'copy', '-c:a', 'aac',
+                        '-map', '0:v:0', '-map', '1:a:0',
+                        '-shortest', out_path]
+            else:
+                # Mix multiple audio tracks together
+                mix_inputs = ''.join(f'[{i+1}:a]' for i in range(n))
+                filter_str = f'{mix_inputs}amix=inputs={n}:duration=longest:normalize=0[aout]'
+                cmd += [
+                    '-filter_complex', filter_str,
+                    '-map', '0:v:0', '-map', '[aout]',
+                    '-c:v', 'copy', '-c:a', 'aac',
+                    '-shortest', out_path
+                ]
+
+            print(f"[Finalize] ffmpeg muxing {n} audio track(s)...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                print(f"[Finalize] ffmpeg error: {result.stderr[-500:]}")
+                return jsonify({'success': False, 'error': f'ffmpeg mux failed: {result.stderr[-300:]}'}), 500
+            print(f"[Finalize] Mux complete: {os.path.getsize(out_path)//1024}KB")
+
+        # ── Step 4: Clean up temp audio files ──────────────────────────────
+        for _, ap in audio_paths:
+            try: os.remove(ap)
+            except: pass
+        try: os.remove(vid_path)
+        except: pass
+
+        # Save to gallery
+        final_url = f'/static/uploads/video_final_{uid}.mp4'
+        _save_to_gallery('video', final_url, '', '')
+
+        return jsonify({'success': True, 'video_url': final_url})
+
+    except req.exceptions.HTTPError as e:
+        print(f"[Finalize] ElevenLabs HTTP error: {e.response.status_code} {e.response.text[:300]}")
+        return jsonify({'success': False, 'error': f'ElevenLabs error ({e.response.status_code}): {e.response.text[:200]}'}), 500
+    except Exception as e:
+        import traceback
+        print(f"[Finalize] Exception: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/ai/video-status/<task_id>', methods=['GET'])
 def api_video_status(task_id):
