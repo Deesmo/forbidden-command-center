@@ -1560,11 +1560,17 @@ def api_generate_video():
 
         # Validate source_image file actually exists on disk (ephemeral filesystem may have wiped it)
         # Fall back to bottle-ref.jpg which is committed to the repo and always available
-        if source_image and source_image.startswith('/static/'):
-            _abs = os.path.join(app.static_folder, source_image[len('/static/'):])
-            if not os.path.exists(_abs):
-                print(f"[Video] source_image {source_image} not found on disk, falling back to bottle-ref.jpg")
-                source_image = '/static/photos/bottle-ref.jpg'
+        # Handle both relative (/static/...) and absolute (https://domain/static/...) URLs
+        if source_image:
+            _base = 'https://forbidden-command-center.onrender.com'
+            _rel = source_image
+            if _rel.startswith(_base):
+                _rel = _rel[len(_base):]  # strip domain to get relative path
+            if _rel.startswith('/static/'):
+                _abs = os.path.join(app.static_folder, _rel[len('/static/'):])
+                if not os.path.exists(_abs):
+                    print(f"[Video] source_image {source_image} not found on disk, falling back to bottle-ref.jpg")
+                    source_image = '/static/photos/bottle-ref.jpg'
 
         provider = data.get('provider', 'runway')   # 'runway' or 'luma'
         model = data.get('model', 'gen4_turbo')     # gen4_turbo, gen4.5, veo3.1_fast
