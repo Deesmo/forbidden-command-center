@@ -1565,18 +1565,22 @@ def _maybe_resize_for_runway(abs_path, rel_url, portrait=True, max_px=1280):
             tgt_w, tgt_h = 1280, 720
         tgt_ratio = tgt_w / tgt_h  # 0.5625 for portrait
 
-        # Centre-crop to target aspect ratio
+        # Crop to target aspect ratio
+        # For tall bottle images (portrait source → portrait target) bias crop to TOP
+        # so the bottle cap is always included and base gets trimmed, not the label/cap
         src_ratio = w / h
         if abs(src_ratio - tgt_ratio) > 0.01:
             if src_ratio > tgt_ratio:
-                # Source is wider — crop width
+                # Source is wider than target — crop width (centre)
                 new_w = int(h * tgt_ratio)
                 x0 = (w - new_w) // 2
                 img = img.crop((x0, 0, x0 + new_w, h))
             else:
-                # Source is taller — crop height
+                # Source is taller than target — crop height
                 new_h = int(w / tgt_ratio)
-                y0 = (h - new_h) // 2
+                # Bias: start from top (y0=0) so bottle cap is never cut off
+                # Only trim from the bottom
+                y0 = 0
                 img = img.crop((0, y0, w, y0 + new_h))
             print(f"[Runway] Cropped {w}x{h} → {img.size[0]}x{img.size[1]} (ratio {tgt_ratio:.3f})")
 
@@ -1656,18 +1660,25 @@ def api_generate_video():
 
         # ── PROMPT: inject brand-specific camera-motion prompt if frontend sends generic/empty ──
         _DEFAULT_VIDEO_PROMPT = (
-            "Slow cinematic dolly push-in toward the Forbidden Bourbon bottle, "
-            "camera moves steadily forward and slightly upward revealing the full bottle, "
-            "warm amber bokeh background, dramatic side lighting catching the faceted glass, "
-            "luxury spirits commercial, no camera shake, no pouring, bottle stays fully in frame"
+            "Slow 180-degree orbit around the Forbidden Bourbon whiskey bottle, "
+            "jet black background with single warm overhead spotlight casting deep dramatic shadows, "
+            "rim lighting catching the faceted glass edges, amber liquid glowing from within, "
+            "luxury spirits commercial, no glass, no pour, no liquid, no people, "
+            "bottle stays fully in frame at all times, smooth cinematic camera movement"
         )
         if not prompt or len(prompt) < 20:
             prompt = _DEFAULT_VIDEO_PROMPT
             print(f"[Video] Using default brand prompt")
         else:
-            # Append camera constraint to any user prompt to prevent pour/zoom-crop issues
-            if 'pour' not in prompt.lower() and 'no pour' not in prompt.lower():
-                prompt = prompt + ", no liquid pouring, camera stays on full bottle, bottle stays fully in frame"
+            # Enforce no-pour and no-glass constraints on all prompts
+            constraints = []
+            if 'pour' not in prompt.lower():
+                constraints.append("no liquid pouring")
+            if 'glass' not in prompt.lower():
+                constraints.append("no glass")
+            constraints.append("bottle stays fully in frame")
+            if constraints:
+                prompt = prompt + ", " + ", ".join(constraints)
             print(f"[Video] Using user prompt (enhanced)")
 
         import requests as req
@@ -1801,8 +1812,8 @@ def api_ai_templates():
          'prompt': 'Slow cinematic dolly push-in toward the Forbidden Bourbon bottle, warm amber bokeh background, dramatic side lighting catching the faceted glass, luxury spirits commercial, no pouring, bottle stays fully in frame'},
         {'id': 'v_orbit', 'label': 'Bottle Orbit', 'category': 'product',
          'prompt': 'Slow 180-degree orbit around Forbidden Bourbon bottle, camera level with label, dark moody background with rim lighting, luxury product reveal, smooth motion, no camera shake'},
-        {'id': 'v_lifestyle', 'label': 'Lifestyle Pour', 'category': 'lifestyle',
-         'prompt': 'Forbidden Bourbon bottle in foreground, blurred speakeasy bar in background, warm candlelight, cinematic shallow depth of field, camera gently drifts left to right'},
+        {'id': 'v_lifestyle', 'label': 'Speakeasy Mood', 'category': 'lifestyle',
+         'prompt': 'Forbidden Bourbon bottle in foreground on a dark mahogany bar, blurred warm speakeasy bar background with candles and bokeh, cinematic shallow depth of field, camera gently drifts left to right, no pour, no glass, bottle stays fully in frame'},
         {'id': 'v_barrel', 'label': 'Barrel Room', 'category': 'heritage',
          'prompt': 'Camera slowly pulls back from close-up of Forbidden Bourbon label to reveal a dark Kentucky rickhouse full of aging barrels, warm amber shafts of light through wood slats, dramatic and cinematic'},
         {'id': 'v_fire', 'label': 'Fireplace Glow', 'category': 'lifestyle',
