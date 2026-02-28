@@ -699,56 +699,56 @@ def api_duplicate_post(post_id):
 # ============================================================
 
 @app.route('/api/platforms/<name>', methods=['PUT'])
-def api_update_platform(n):
+def api_update_platform(name):
     try:
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'No data provided'}), 400
         
-        db.update_platform(n, **data)
+        db.update_platform(name, **data)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/platforms/<name>/test', methods=['POST'])
-def api_test_platform(n):
+def api_test_platform(name):
     """Test a platform connection"""
     try:
-        platform = db.get_platform(n)
+        platform = db.get_platform(name)
         if not platform:
             return jsonify({'success': False, 'error': 'Platform not found'}), 404
         
-        if n == 'bluesky':
+        if name == 'bluesky':
             from publisher import BlueskyPublisher
             result = BlueskyPublisher.authenticate(
                 platform.get('username', ''),
                 platform.get('api_key', '')
             )
             if result['success']:
-                db.update_platform(n, connected=1, username=result['handle'])
+                db.update_platform(name, connected=1, username=result['handle'])
                 return jsonify({'success': True, 'message': f"Connected as @{result['handle']}"})
             else:
-                db.update_platform(n, connected=0)
+                db.update_platform(name, connected=0)
                 return jsonify({'success': False, 'error': result['error']})
         
-        elif n == 'twitter':
+        elif name == 'twitter':
             # Simple validation - check credentials are provided
             if platform.get('api_key') and platform.get('access_token'):
-                db.update_platform(n, connected=1)
+                db.update_platform(name, connected=1)
                 return jsonify({'success': True, 'message': 'Credentials saved. Will verify on first post.'})
             else:
                 return jsonify({'success': False, 'error': 'API Key and Access Token required'})
         
-        elif n == 'facebook':
+        elif name == 'facebook':
             if platform.get('access_token') and platform.get('username'):
-                db.update_platform(n, connected=1)
+                db.update_platform(name, connected=1)
                 return jsonify({'success': True, 'message': 'Credentials saved. Will verify on first post.'})
             else:
                 return jsonify({'success': False, 'error': 'Page Access Token and Page ID required'})
         
-        elif n == 'linkedin':
+        elif name == 'linkedin':
             if platform.get('access_token') and platform.get('username'):
-                db.update_platform(n, connected=1)
+                db.update_platform(name, connected=1)
                 return jsonify({'success': True, 'message': 'Credentials saved. Will verify on first post.'})
             else:
                 return jsonify({'success': False, 'error': 'Access Token and Author URN required'})
@@ -759,9 +759,9 @@ def api_test_platform(n):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/platforms/<name>/disconnect', methods=['POST'])
-def api_disconnect_platform(n):
+def api_disconnect_platform(name):
     try:
-        db.update_platform(n, connected=0, api_key='', api_secret='', 
+        db.update_platform(name, connected=0, api_key='', api_secret='', 
                           access_token='', refresh_token='', username='')
         return jsonify({'success': True})
     except Exception as e:
