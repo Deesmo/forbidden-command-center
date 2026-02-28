@@ -266,8 +266,34 @@ window.generateImage = function () {
   document.getElementById("imageLoading").classList.remove("hidden");
   document.getElementById("imageOutput").classList.add("hidden");
   document.getElementById("generateImageBtn").disabled = true;
-  document.getElementById("generateImageBtn").textContent =
-    useRef ? "Building scene around bottle..." : "Generating...";
+
+  /* Show progress steps for composite mode */
+  var stepsEl = document.getElementById("imageProgressSteps");
+  var titleEl = document.getElementById("imageLoadingTitle");
+  var timeEl = document.getElementById("imageLoadingTime");
+  if (useRef) {
+    stepsEl.classList.remove("hidden");
+    titleEl.textContent = "Building scene around your bottle...";
+    timeEl.textContent = "Composite mode takes 60-90 seconds";
+    document.getElementById("step1").innerHTML = "⏳ Step 1: Cutting out bottle...";
+    document.getElementById("step2").innerHTML = "○ Step 2: Generating background scene...";
+    document.getElementById("step3").innerHTML = "○ Step 3: Compositing bottle onto scene...";
+    document.getElementById("generateImageBtn").textContent = "Building scene around bottle...";
+    /* Simulate progress updates */
+    window._imgStep2Timer = setTimeout(function() {
+      document.getElementById("step1").innerHTML = "✅ Step 1: Bottle cutout ready";
+      document.getElementById("step2").innerHTML = "⏳ Step 2: Generating background scene...";
+    }, 8000);
+    window._imgStep3Timer = setTimeout(function() {
+      document.getElementById("step2").innerHTML = "✅ Step 2: Background scene generated";
+      document.getElementById("step3").innerHTML = "⏳ Step 3: Compositing bottle onto scene...";
+    }, 35000);
+  } else {
+    stepsEl.classList.add("hidden");
+    titleEl.textContent = "Generating your image...";
+    timeEl.textContent = "This takes 15-30 seconds";
+    document.getElementById("generateImageBtn").textContent = "Generating...";
+  }
 
   var fullPrompt = prompt;
   if (!useRef) {
@@ -293,6 +319,8 @@ window.generateImage = function () {
       document.getElementById("imageLoading").classList.add("hidden");
       document.getElementById("generateImageBtn").disabled = false;
       document.getElementById("generateImageBtn").textContent = "✦ Generate Image";
+      clearTimeout(window._imgStep2Timer);
+      clearTimeout(window._imgStep3Timer);
 
       if (data.error) {
         document.getElementById("imageError").classList.remove("hidden");
@@ -326,6 +354,8 @@ window.generateImage = function () {
       document.getElementById("imageLoading").classList.add("hidden");
       document.getElementById("generateImageBtn").disabled = false;
       document.getElementById("generateImageBtn").textContent = "✦ Generate Image";
+      clearTimeout(window._imgStep2Timer);
+      clearTimeout(window._imgStep3Timer);
       document.getElementById("imageError").classList.remove("hidden");
       document.getElementById("imageErrorDetail").textContent = err.message;
       document.getElementById("imageOutput").classList.remove("hidden");
@@ -344,6 +374,35 @@ window.downloadImage = function () {
   a.href = document.getElementById("generatedImage").src;
   a.download = "forbidden-ai-" + Date.now() + ".png";
   a.click();
+};
+
+/* saveToPhone: mobile-friendly save that doesn't navigate away */
+window.saveToPhone = function () {
+  var imgSrc = document.getElementById("generatedImage").src;
+  /* On iOS Safari, anchor download doesn't work — fetch as blob */
+  window.toast("Preparing download...", "info");
+  fetch(imgSrc)
+    .then(function (r) { return r.blob(); })
+    .then(function (blob) {
+      /* Try blob download first */
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "forbidden-ai-" + Date.now() + ".png";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 200);
+      window.toast("Image saved! Check your Downloads.", "success");
+    })
+    .catch(function () {
+      /* Fallback: open in new tab so user can long-press to save */
+      window.open(imgSrc, "_blank");
+      window.toast("Long-press the image to save it to your phone.", "info");
+    });
 };
 
 window.copyImageUrl = function () {
