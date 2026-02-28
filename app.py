@@ -1300,9 +1300,14 @@ def api_generate_image():
         errors = []
         
         # =====================================================
-        # STEP 1: GET BOTTLE CUTOUT (real photo, exact pixels)
+        # STEPS 1 & 2: PARALLEL — cutout + background at same time
+        # Saves ~10-15s by running remove.bg and DALL-E concurrently
         # =====================================================
         bottle_cutout = None
+        background_img = None
+        
+        # Prepare cutout source path
+        source_path = None
         if use_reference:
             if bottle_type == 'single_barrel':
                 source_candidates = [
@@ -1319,32 +1324,17 @@ def api_generate_image():
                     os.path.join(app.static_folder, 'photos', 'bottle-ref.jpg'),
                 ]
             
-            # Log all candidates so we can debug path issues in Render logs
             for c in source_candidates:
                 print(f"[AI Studio] Checking photo: {os.path.basename(c)} — exists: {os.path.exists(c)}")
             
             source_path = next((c for c in source_candidates if os.path.exists(c)), None)
             
-            if source_path:
-                try:
-                    bottle_cutout = _get_bottle_cutout(source_path, api_key=api_key)
-                    print(f"[AI Studio] Got bottle cutout: {bottle_cutout.size}")
-                except Exception as e:
-                    errors.append(f"Cutout: {str(e)[:200]}")
-                    print(f"[AI Studio] Cutout failed: {e}")
-            else:
+            if not source_path:
                 all_paths = [os.path.basename(c) for c in source_candidates]
                 errors.append(f"No studio photo found. Tried: {all_paths}")
                 print(f"[AI Studio] No bottle photo found. Candidates: {source_candidates}")
         
-        # =====================================================
-        # STEP 2: GENERATE BACKGROUND SCENE (AI, no bottle)
-        # =====================================================
-        background_img = None
-        
-        # Background prompt: describe the scene WITHOUT any bottle/product
-        # The bottle is composited in Step 3 — AI only draws the environment
-        # Add composition hint so negative space aligns with bottle placement
+        # Prepare background prompt
         if bottle_position == 'left':
             comp_hint = "Richer background detail on the right side, open negative space on the left third for a product. "
         elif bottle_position == 'right':
@@ -1364,42 +1354,71 @@ def api_generate_image():
             "Photorealistic, commercial photography quality."
         )
         
-        print(f"[AI Studio] Generating background with gpt-image-1.5...")
-        try:
-            resp = req.post(
-                'https://api.openai.com/v1/images/generations',
-                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-                json={
-                    'model': 'gpt-image-1.5',
-                    'prompt': bg_scene_prompt,
-                    'n': 1,
-                    'size': gpt_size,
-                    'quality': quality if quality in ('low', 'medium', 'high') else 'high',
-                    'output_format': 'png',
-                },
-                timeout=120
-            )
-            
-            if resp.status_code == 200:
-                result = resp.json()
-                img_b64 = result.get('data', [{}])[0].get('b64_json')
-                if img_b64:
-                    bg_bytes = b64.b64decode(img_b64)
-                    background_img = PILImage.open(io.BytesIO(bg_bytes)).convert('RGBA')
-                    print(f"[AI Studio] Background generated: {background_img.size}")
+        # --- Define worker functions for parallel execution ---
+        def _do_cutout():
+            if not source_path:
+                return None
+            try:
+                result = _get_bottle_cutout(source_path, api_key=api_key)
+                print(f"[AI Studio] Got bottle cutout: {result.size}")
+                return result
+            except Exception as e:
+                errors.append(f"Cutout: {str(e)[:200]}")
+                print(f"[AI Studio] Cutout failed: {e}")
+                return None
+        
+        def _do_background():
+            print(f"[AI Studio] Generating background with gpt-image-1.5...")
+            try:
+                resp = req.post(
+                    'https://api.openai.com/v1/images/generations',
+                    headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                    json={
+                        'model': 'gpt-image-1.5',
+                        'prompt': bg_scene_prompt,
+                        'n': 1,
+                        'size': gpt_size,
+                        'quality': quality if quality in ('low', 'medium', 'high') else 'high',
+                        'output_format': 'png',
+                    },
+                    timeout=120
+                )
+                
+                if resp.status_code == 200:
+                    result = resp.json()
+                    img_b64 = result.get('data', [{}])[0].get('b64_json')
+                    if img_b64:
+                        bg_bytes = b64.b64decode(img_b64)
+                        bg = PILImage.open(io.BytesIO(bg_bytes)).convert('RGBA')
+                        print(f"[AI Studio] Background generated: {bg.size}")
+                        return bg
+                    else:
+                        errors.append("Background generation: no image data")
                 else:
-                    errors.append("Background generation: no image data")
-            else:
-                err_msg = 'Unknown error'
-                try:
-                    err_msg = resp.json().get('error', {}).get('message', resp.text[:500])
-                except:
-                    err_msg = resp.text[:500]
-                errors.append(f"Background generation: {err_msg}")
-                print(f"[AI Studio] Background generation failed ({resp.status_code}): {err_msg}")
-        except Exception as e:
-            errors.append(f"Background generation: {str(e)[:200]}")
-            print(f"[AI Studio] Background generation exception: {e}")
+                    err_msg = 'Unknown error'
+                    try:
+                        err_msg = resp.json().get('error', {}).get('message', resp.text[:500])
+                    except:
+                        err_msg = resp.text[:500]
+                    errors.append(f"Background generation: {err_msg}")
+                    print(f"[AI Studio] Background generation failed ({resp.status_code}): {err_msg}")
+            except Exception as e:
+                errors.append(f"Background generation: {str(e)[:200]}")
+                print(f"[AI Studio] Background generation exception: {e}")
+            return None
+        
+        # --- Run cutout + background in parallel ---
+        if use_reference and source_path:
+            from concurrent.futures import ThreadPoolExecutor
+            print("[AI Studio] Running cutout + background in PARALLEL...")
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                cutout_future = executor.submit(_do_cutout)
+                bg_future = executor.submit(_do_background)
+                bottle_cutout = cutout_future.result()
+                background_img = bg_future.result()
+        else:
+            # Non-composite: just generate background
+            background_img = _do_background()
         
         # =====================================================
         # STEP 3: AI COMPOSITE — gpt-image-1.5 Edit with both images
