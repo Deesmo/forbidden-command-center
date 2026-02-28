@@ -1908,6 +1908,11 @@
     <script>
     (function() {
         function navigateSPA(url) {
+            // Force full page reload for pages with heavy JS (AI Studio)
+            if (url.indexOf('/ai-studio') > -1 || url.indexOf('/ai_studio') > -1) {
+                window.location.href = url;
+                return;
+            }
             // Show a subtle loading state
             var main = document.querySelector('.main-content');
             main.style.opacity = '0.5';
