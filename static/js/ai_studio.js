@@ -426,7 +426,21 @@ window.generateVideo = function () {
   document.getElementById("videoOutput").classList.add("hidden");
   document.getElementById("generateVideoBtn").disabled = true;
   document.getElementById("generateVideoBtn").textContent = "Generating...";
-  document.getElementById("videoStatus").textContent = "Submitting...";
+  document.getElementById("videoStatus").textContent = "";
+
+  /* Progress steps */
+  document.getElementById("vstep1").innerHTML = "⏳ Step 1: Preparing source image...";
+  document.getElementById("vstep2").innerHTML = "○ Step 2: Submitting to Runway...";
+  document.getElementById("vstep3").innerHTML = "○ Step 3: Rendering video...";
+  document.getElementById("vstep4").innerHTML = "○ Step 4: Downloading & processing...";
+
+  /* Elapsed timer */
+  var videoStartTime = Date.now();
+  window._videoElapsedTimer = setInterval(function () {
+    var elapsed = Math.round((Date.now() - videoStartTime) / 1000);
+    var el = document.getElementById("videoElapsed");
+    if (el) el.textContent = elapsed + "s elapsed";
+  }, 1000);
 
   var fullPrompt;
   if (sourceImage) {
@@ -457,12 +471,16 @@ window.generateVideo = function () {
         return;
       }
       if (data.task_id) {
+        document.getElementById("vstep1").innerHTML = "✅ Step 1: Source image ready";
+        document.getElementById("vstep2").innerHTML = "✅ Step 2: Submitted to Runway";
+        document.getElementById("vstep3").innerHTML = "⏳ Step 3: Rendering video...";
         window.pollVideoStatus(data.task_id, data.provider || 'runway');
       } else if (data.video_url) {
         window.showVideoResult(data.video_url);
       }
     })
     .catch(function (err) {
+      clearInterval(window._videoElapsedTimer);
       document.getElementById("videoLoading").classList.add("hidden");
       document.getElementById("generateVideoBtn").disabled = false;
       document.getElementById("generateVideoBtn").textContent = "🎬 Generate Video";
@@ -483,6 +501,7 @@ window.pollVideoStatus = function (taskId, provider) {
           window.showVideoResult(data.video_url);
         } else if (data.status === "FAILED") {
           clearInterval(interval);
+          clearInterval(window._videoElapsedTimer);
           document.getElementById("videoLoading").classList.add("hidden");
           document.getElementById("generateVideoBtn").disabled = false;
           document.getElementById("generateVideoBtn").textContent = "🎬 Generate Video";
@@ -501,6 +520,7 @@ window.pollVideoStatus = function (taskId, provider) {
 
 /* ── showVideoResult ── */
 window.showVideoResult = function (url) {
+  clearInterval(window._videoElapsedTimer);
   document.getElementById("videoLoading").classList.add("hidden");
   document.getElementById("generateVideoBtn").disabled = false;
   document.getElementById("generateVideoBtn").textContent = "🎬 Generate Video";
@@ -521,6 +541,32 @@ window.downloadVideo = function () {
   a.href = document.getElementById("generatedVideo").src;
   a.download = "forbidden-ai-" + Date.now() + ".mp4";
   a.click();
+};
+
+/* saveVideoToPhone: mobile-friendly video save */
+window.saveVideoToPhone = function () {
+  var vidSrc = document.getElementById("generatedVideo").src;
+  window.toast("Preparing video download...", "info");
+  fetch(vidSrc)
+    .then(function (r) { return r.blob(); })
+    .then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "forbidden-ai-" + Date.now() + ".mp4";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 200);
+      window.toast("Video saved! Check your Downloads.", "success");
+    })
+    .catch(function () {
+      window.open(vidSrc, "_blank");
+      window.toast("Long-press the video to save it to your phone.", "info");
+    });
 };
 
 /* ── toggleFavorite ── */
