@@ -160,6 +160,8 @@ window.switchMode = function (mode, btn) {
   document.getElementById("videoMode").classList.toggle("hidden", mode !== "video");
   document.getElementById("galleryMode").classList.toggle("hidden", mode !== "gallery");
   if (mode === "gallery") window.loadGallery();
+  if (mode === "video") window.loadVideoPromptTemplates();
+  if (mode === "image") window.loadPromptTemplates();
 };
 
 /* ── selectStyle / selectVideoStyle ── */
@@ -208,12 +210,17 @@ window.loadVideoPromptTemplates = function () {
   var c = document.getElementById("videoPromptTemplates");
   var prompts;
   if (window._apiVideoTemplates) {
-    var catMap = { pour: "product", glamour: "product", bar: "lifestyle", nature: "heritage" };
-    var cat = catMap[window.currentVideoStyle] || "product";
+    var catMap = {
+      pour: ["product", "brand"],
+      glamour: ["product", "brand", "social"],
+      bar: ["lifestyle", "social"],
+      nature: ["heritage"]
+    };
+    var cats = catMap[window.currentVideoStyle] || ["product"];
     var filtered = window._apiVideoTemplates.filter(function (t) {
-      return t.category === cat;
+      return cats.indexOf(t.category) !== -1;
     });
-    if (filtered.length === 0) filtered = window._apiVideoTemplates.slice(0, 8);
+    if (filtered.length === 0) filtered = window._apiVideoTemplates.slice(0, 10);
     prompts = filtered.map(function (t) {
       return { label: t.label, prompt: t.prompt };
     });
