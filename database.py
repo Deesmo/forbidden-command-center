@@ -41,7 +41,10 @@ def _execute(conn, sql, params=None):
         sql = sql.replace('?', '%s')
         # Convert SQLite-specific syntax
         sql = sql.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
-        sql = sql.replace('INSERT OR IGNORE', 'INSERT')
+        # Convert SQLite's INSERT OR IGNORE to Postgres ON CONFLICT DO NOTHING
+        if 'INSERT OR IGNORE' in sql:
+            sql = sql.replace('INSERT OR IGNORE INTO', 'INSERT INTO')
+            sql = sql.rstrip().rstrip(';') + ' ON CONFLICT DO NOTHING'
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if USE_POSTGRES else conn.cursor()
     if params:
         cur.execute(sql, params)

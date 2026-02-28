@@ -457,7 +457,7 @@ window.generateVideo = function () {
         return;
       }
       if (data.task_id) {
-        window.pollVideoStatus(data.task_id);
+        window.pollVideoStatus(data.task_id, data.provider || 'runway');
       } else if (data.video_url) {
         window.showVideoResult(data.video_url);
       }
@@ -471,10 +471,11 @@ window.generateVideo = function () {
 };
 
 /* ── pollVideoStatus ── */
-window.pollVideoStatus = function (taskId) {
+window.pollVideoStatus = function (taskId, provider) {
+  provider = provider || 'runway';
   document.getElementById("videoStatus").textContent = "Processing video...";
   var interval = setInterval(function () {
-    fetch("/api/ai/video-status/" + taskId)
+    fetch("/api/ai/video-status/" + taskId + "?provider=" + provider)
       .then(window._sj)
       .then(function (data) {
         if (data.status === "SUCCEEDED" && data.video_url) {
@@ -490,6 +491,9 @@ window.pollVideoStatus = function (taskId) {
           document.getElementById("videoStatus").textContent =
             "Status: " + (data.status || "processing") + "...";
         }
+      })
+      .catch(function (err) {
+        console.log("Video poll error:", err);
       });
   }, 5000);
   setTimeout(function () { clearInterval(interval); }, 300000);
@@ -539,7 +543,8 @@ window.toggleFavorite = function () {
           : "";
         window.toast(newSaved ? "Added to favorites!" : "Removed from favorites", "success");
       }
-    });
+    })
+    .catch(function (err) { window.toast("Failed to save: " + err.message, "error"); });
 };
 
 /* ── loadGallery ── */
@@ -603,6 +608,11 @@ window.loadGallery = function (filter) {
           savedStar + bottleTag + saveBtn +
           '<div style="padding:6px 8px;font-size:0.8rem;color:var(--text-muted);">🎨 ' + shortPrompt + "</div></div>";
       }).join("");
+    })
+    .catch(function (err) {
+      var grid = document.getElementById("galleryGrid");
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);"><p>Failed to load gallery</p></div>';
+      console.log("Gallery load error:", err);
     });
 };
 
@@ -640,7 +650,8 @@ window.galToggleSave = function (id, saved, btn) {
         window.toast(saved ? "Added to favorites!" : "Removed from favorites", "success");
         window.loadGallery();
       }
-    });
+    })
+    .catch(function (err) { window.toast("Failed: " + err.message, "error"); });
 };
 
 /* ── saveKey ── */
