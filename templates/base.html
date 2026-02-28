@@ -1365,6 +1365,9 @@
     </style>
 </head>
 <body>
+    <!-- SPA PROGRESS BAR -->
+    <div id="spaProgress" style="position:fixed;top:0;left:0;height:3px;background:var(--gold);width:0%;transition:width 0.3s ease;z-index:9999;pointer-events:none;"></div>
+
     <!-- TOP NAVIGATION -->
     <nav class="top-nav">
         <a href="/" class="logo" style="text-decoration: none;">
@@ -1913,7 +1916,10 @@
                 window.location.href = url;
                 return;
             }
-            // Show a subtle loading state
+            // Show progress bar and subtle loading state
+            var bar = document.getElementById('spaProgress');
+            bar.style.transition = 'width 0.3s ease';
+            bar.style.width = '30%';
             var main = document.querySelector('.main-content');
             main.style.opacity = '0.5';
             main.style.transition = 'opacity 0.15s';
@@ -1928,6 +1934,9 @@
                     var newTitle = doc.querySelector('title');
 
                     if (newMain) {
+                        // Complete progress bar
+                        bar.style.width = '100%';
+                        setTimeout(function() { bar.style.transition = 'none'; bar.style.width = '0%'; setTimeout(function() { bar.style.transition = 'width 0.3s ease'; }, 50); }, 350);
                         // Swap main content
                         main.innerHTML = newMain.innerHTML;
                         main.style.opacity = '1';
@@ -2010,6 +2019,7 @@
                     }
                 })
                 .catch(function() {
+                    bar.style.width = '0%';
                     window.location.href = url;
                 });
         }

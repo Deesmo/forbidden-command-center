@@ -201,7 +201,8 @@ window.loadPromptTemplates = function () {
     prompts = window.IMAGE_PROMPTS_FALLBACK[window.currentStyle] || [];
   }
   c.innerHTML = prompts.map(function (p) {
-    return '<button class="prompt-chip" onclick="usePrompt(this,\'image\')">' + p + "</button>";
+    var display = p.length > 60 ? p.substring(0, 57) + "..." : p;
+    return '<button class="prompt-chip" title="' + p.replace(/"/g, '&quot;') + '" data-full="' + p.replace(/"/g, '&quot;') + '" onclick="usePrompt(this,\'image\')">' + display + "</button>";
   }).join("");
 };
 
@@ -244,7 +245,7 @@ window.usePrompt = function (btn, type) {
   var ta = type === "video"
     ? document.getElementById("videoPrompt")
     : document.getElementById("imagePrompt");
-  ta.value = btn.textContent;
+  ta.value = btn.dataset.full || btn.textContent;
   ta.focus();
 };
 
@@ -356,6 +357,7 @@ window.generateImage = function () {
       document.getElementById("favBtn").style.background = "";
       var modelMsg = data.model ? " (" + data.model + ")" : "";
       window.toast("Image generated!" + modelMsg, "success");
+      try { window.loadRecentGallery(); } catch(e) {}
     })
     .catch(function (err) {
       document.getElementById("imageLoading").classList.add("hidden");
@@ -705,6 +707,27 @@ window.galToggleSave = function (id, saved, btn) {
       }
     })
     .catch(function (err) { window.toast("Failed: " + err.message, "error"); });
+};
+
+/* ── loadRecentGallery ── */
+window.loadRecentGallery = function () {
+  fetch("/api/ai/gallery?limit=5")
+    .then(window._sj)
+    .then(function (data) {
+      var container = document.getElementById("recentGalleryRow");
+      var wrapper = document.getElementById("recentGallery");
+      if (!container || !wrapper) return;
+      var images = (data.items || []).filter(function (i) { return i.type === "image" && i.url; });
+      if (images.length === 0) { wrapper.style.display = "none"; return; }
+      wrapper.style.display = "";
+      container.innerHTML = images.map(function (item) {
+        return '<img src="' + item.url + '" alt="Recent" title="' +
+          (item.prompt || "").replace(/"/g, "&quot;") +
+          '" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;flex-shrink:0;" onclick="window.open(\'' +
+          item.url + '\')" loading="lazy">';
+      }).join("");
+    })
+    .catch(function () {});
 };
 
 /* ── saveKey ── */

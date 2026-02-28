@@ -2469,11 +2469,12 @@ def api_ai_gallery():
     """Get AI-generated content gallery"""
     try:
         saved_only = request.args.get('saved', '') == 'true'
+        limit = min(int(request.args.get('limit', '50')), 100)
         conn = db.get_db()
         if saved_only:
-            items = db._fetchall(conn, 'SELECT * FROM ai_gallery WHERE saved = TRUE ORDER BY created_at DESC LIMIT 100')
+            items = db._fetchall(conn, 'SELECT * FROM ai_gallery WHERE saved = TRUE ORDER BY created_at DESC LIMIT ?', (limit,))
         else:
-            items = db._fetchall(conn, 'SELECT * FROM ai_gallery ORDER BY created_at DESC LIMIT 50')
+            items = db._fetchall(conn, 'SELECT * FROM ai_gallery ORDER BY created_at DESC LIMIT ?', (limit,))
         conn.close()
 
         result = []
