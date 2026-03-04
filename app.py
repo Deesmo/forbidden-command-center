@@ -59,7 +59,8 @@ def handle_exception(e):
 # API key helper - checks env vars first, then database
 def get_api_key(provider):
     """Get API key from env var first, then database. Set once in Render, works everywhere."""
-    env_map = {'openai': 'OPENAI_API_KEY', 'runway': 'RUNWAY_API_KEY', 'elevenlabs': 'ELEVENLABS_API_KEY'}
+    env_map = {'openai': 'OPENAI_API_KEY', 'runway': 'RUNWAY_API_KEY', 'elevenlabs': 'ELEVENLABS_API_KEY',
+               'kling_ak': 'KLING_AK', 'kling_sk': 'KLING_SK'}
     env_key = os.environ.get(env_map.get(provider, ''), '')
     if env_key:
         return env_key
@@ -1814,6 +1815,80 @@ def api_generate_video():
                 print(f"[Video] Luma failed ({resp.status_code}): {error_msg}")
                 return jsonify({'success': False, 'error': f'Luma API Error ({resp.status_code}): {error_msg}'}), 500
 
+        # ── KLING AI ───────────────────────────────────────────────────────────
+        elif provider == 'kling':
+            kling_ak = os.environ.get('KLING_AK', '')
+            kling_sk = os.environ.get('KLING_SK', '')
+            if not kling_ak or not kling_sk:
+                return jsonify({'success': False, 'error': 'Kling API keys not configured. Set KLING_AK and KLING_SK in Render env vars.'}), 400
+
+            # Generate JWT token for Kling auth
+            import time as _time
+            try:
+                import jwt as _jwt
+            except ImportError:
+                import subprocess as _sp
+                _sp.run(['pip', 'install', 'PyJWT'], check=True)
+                import jwt as _jwt
+
+            _now = int(_time.time())
+            _kling_token = _jwt.encode(
+                {'iss': kling_ak, 'exp': _now + 1800, 'nbf': _now - 5, 'iat': _now},
+                kling_sk,
+                algorithm='HS256'
+            )
+            _kling_headers = {
+                'Authorization': f'Bearer {_kling_token}',
+                'Content-Type': 'application/json'
+            }
+
+            # Build base64 image payload
+            _kling_image_b64 = None
+            if source_image:
+                _base = 'https://forbidden-command-center.onrender.com'
+                _rel = source_image
+                if _rel.startswith(_base):
+                    _rel = _rel[len(_base):]
+                if _rel.startswith('/static/'):
+                    _img_abs = os.path.join(app.static_folder, _rel[len('/static/'):])
+                    if os.path.exists(_img_abs):
+                        import base64 as _b64
+                        with open(_img_abs, 'rb') as _f:
+                            _kling_image_b64 = _b64.b64encode(_f.read()).decode('utf-8')
+                    else:
+                        print(f"[Kling] Source image not found: {_img_abs}")
+
+            _kling_payload = {
+                'model_name': 'kling-v1-6',
+                'prompt': prompt,
+                'duration': '5',
+                'mode': 'std'
+            }
+            if _kling_image_b64:
+                _kling_payload['image'] = _kling_image_b64
+
+            print(f"[Video] Kling kling-v1-6 — image={'yes' if _kling_image_b64 else 'no'}")
+
+            resp = req.post(
+                'https://api.klingai.com/v1/videos/image2video',
+                headers=_kling_headers,
+                json=_kling_payload,
+                timeout=30
+            )
+
+            if resp.status_code in (200, 201):
+                result = resp.json()
+                task_id = result.get('data', {}).get('task_id', '')
+                print(f"[Video] Kling task created: {task_id}")
+                return jsonify({'success': True, 'task_id': task_id, 'provider': 'kling'})
+            else:
+                try:
+                    error_msg = resp.json().get('message', resp.text[:300])
+                except Exception:
+                    error_msg = resp.text[:300]
+                print(f"[Video] Kling failed ({resp.status_code}): {error_msg}")
+                return jsonify({'success': False, 'error': f'Kling API Error ({resp.status_code}): {error_msg}'}), 500
+
         else:
             return jsonify({'success': False, 'error': f'Unknown provider: {provider}'}), 400
 
@@ -2457,6 +2532,47 @@ def api_video_status(task_id):
                         video_url = _auto_add_audio(video_url, duration=5)
                         _save_to_gallery('video', video_url, '', '')
                 return jsonify({'status': status, 'video_url': video_url, 'error': result.get('failure_reason', None)})
+            else:
+                return jsonify({'status': 'ERROR', 'error': resp.text}), 500
+
+        elif provider == 'kling':
+            kling_ak = os.environ.get('KLING_AK', '')
+            kling_sk = os.environ.get('KLING_SK', '')
+            if not kling_ak or not kling_sk:
+                return jsonify({'status': 'ERROR', 'error': 'Kling not configured'}), 400
+            import time as _time
+            try:
+                import jwt as _jwt
+            except ImportError:
+                import subprocess as _sp
+                _sp.run(['pip', 'install', 'PyJWT'], check=True)
+                import jwt as _jwt
+            _now = int(_time.time())
+            _kling_token = _jwt.encode(
+                {'iss': kling_ak, 'exp': _now + 1800, 'nbf': _now - 5, 'iat': _now},
+                kling_sk,
+                algorithm='HS256'
+            )
+            resp = req.get(
+                f'https://api.klingai.com/v1/videos/image2video/{task_id}',
+                headers={'Authorization': f'Bearer {_kling_token}', 'Content-Type': 'application/json'},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                task_status = result.get('data', {}).get('task_status', 'submitted')
+                # Kling statuses: submitted, processing, succeed, failed
+                status_map = {'submitted': 'PENDING', 'processing': 'RUNNING', 'succeed': 'SUCCEEDED', 'failed': 'FAILED'}
+                status = status_map.get(task_status, 'RUNNING')
+                video_url = None
+                if status == 'SUCCEEDED':
+                    try:
+                        video_url = result['data']['works'][0]['resource']['resource']
+                        video_url = _auto_add_audio(video_url, duration=5)
+                        _save_to_gallery('video', video_url, '', '')
+                    except (KeyError, IndexError):
+                        pass
+                return jsonify({'status': status, 'video_url': video_url, 'error': result.get('data', {}).get('task_status_msg', None)})
             else:
                 return jsonify({'status': 'ERROR', 'error': resp.text}), 500
 
