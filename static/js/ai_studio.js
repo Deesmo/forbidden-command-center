@@ -78,10 +78,26 @@ window.VIDEO_PROMPTS_FALLBACK = {
     "Pouring a perfect Old Fashioned"
   ],
   glamour: [
-    "Camera slowly orbiting the bottle",
-    "Bottle reveal from shadow into spotlight",
-    "Light rays moving across the bottle label",
-    "Condensation drops on a chilled glass"
+    "Camera slowly orbits the Forbidden bottle 360 degrees, dark background, warm spotlight",
+    "Dramatic slow push-in toward the FORBIDDEN label, label comes into sharp focus",
+    "Golden spotlight sweeps left to right across the bottle, amber bourbon glowing",
+    "Bottle emerges from darkness as a single beam of light slowly illuminates it",
+    "Camera pulls back from extreme close-up of label to reveal full bottle beauty",
+    "Soft smoke or mist slowly drifts past the bottle, moody dark atmosphere",
+    "Bottle rotates slowly as rim lighting traces the faceted glass edges",
+    "Camera cranes down from above the bottle cap to label level, dramatic reveal",
+    "Pulsing warm glow emanates from inside the bottle, amber bourbon radiant",
+    "Bottle sits on reflective black marble, slow camera slide across the surface",
+    "Sparkling light particles drift slowly past the bottle like gold dust",
+    "Camera dollies slowly around the bottle, bokeh bar lights in background",
+    "Dramatic underlit shot, light rises from below illuminating the bourbon inside",
+    "Two Forbidden bottles side by side, camera slowly pulls back to reveal both",
+    "Bottle on aged oak barrel, camera slowly circles in misty warehouse light",
+    "Close-up of faceted bottle glass catching prismatic light, slow rotation",
+    "Moonlight beam cuts through darkness and illuminates the Forbidden label",
+    "Bottle on ice-frosted surface, cold breath mist rises around it slowly",
+    "Camera tilts up from marble base to bottle cap, reverent slow reveal",
+    "Cinematic lens flare sweeps across the bottle as light source moves behind it"
   ],
   bar: [
     "Bartender crafting a cocktail, moody lighting",
