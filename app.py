@@ -1639,7 +1639,7 @@ def api_generate_video():
         bottle_type = data.get('bottle_type', 'small_batch')  # 'small_batch' or 'single_barrel'
 
         # ── SOURCE IMAGE: prefer clean isolated bottle shots, avoid pre-composed lifestyle images ──
-        # Small Batch (copper): SmallBatch1.jpg > Black_Front_LightBG_V1.png > bottle-ref.jpg
+        # Small Batch (copper): S1110515-Edit.jpg (9/10 QA lifestyle bar shot) > SmallBatch1.jpg > Black_Front_LightBG_V1.png > bottle-ref.jpg
         # Single Barrel (gold): Golden_Front_57 > Golden_Front_58 > SingleBarrel1.jpg
         if bottle_type == 'single_barrel':
             _clean_bottle_candidates = [
@@ -1651,8 +1651,9 @@ def api_generate_video():
             ]
         else:
             _clean_bottle_candidates = [
-                '/static/photos/SmallBatch1.jpg',
+                '/static/photos/gallery/S1110515-Edit.jpg',
                 '/static/photos/gallery/SmallBatch1.jpg',
+                '/static/photos/SmallBatch1.jpg',
                 '/static/photos/gallery/Black_Front_LightBG_V1.png',
                 '/static/photos/bottle-ref.jpg',
             ]
