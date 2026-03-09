@@ -26,7 +26,7 @@ services:
         sync: false
       - key: KLING_SK
         sync: false
-      - key: REMOVE_BG_API_KEY
+      - key: REMOVEBG_API_KEY
         sync: false
 
       # Blog Publishing
@@ -55,10 +55,14 @@ services:
       - key: PINTEREST_TOKEN
         sync: false
 
-      # Email
+      # Email — supports SendGrid or Resend (set whichever you have)
       - key: SENDGRID_API_KEY
         sync: false
       - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
         sync: false
 
       # Analytics
