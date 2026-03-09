@@ -1,4 +1,4 @@
-# Forbidden Bourbon Command Center v15b — Gallery + Photos + AI Bottle Ref Fix
+# Forbidden Bourbon Command Center v15c — Model update + Resend email + REMOVEBG fix
 import os
 import json
 import threading
@@ -929,7 +929,7 @@ Be specific about the bourbon's qualities. Match the specified tone and platform
                     'Content-Type': 'application/json'
                 },
                 json={
-                    'model': 'claude-sonnet-4-20250514',
+                    'model': 'claude-sonnet-4-6',
                     'max_tokens': 1024,
                     'system': system_prompt,
                     'messages': [{'role': 'user', 'content': user_message}]
@@ -2980,7 +2980,7 @@ def blog_auto_post(platform):
             if anthropic_key:
                 resp = req.post('https://api.anthropic.com/v1/messages',
                     headers={'x-api-key': anthropic_key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json'},
-                    json={'model': 'claude-sonnet-4-20250514', 'max_tokens': 1024, 'system': REDDIT_SYSTEM_PROMPT,
+                    json={'model': 'claude-sonnet-4-6', 'max_tokens': 1024, 'system': REDDIT_SYSTEM_PROMPT,
                           'messages': [{'role': 'user', 'content': user_message}]}, timeout=60)
                 text = ''.join(b['text'] for b in resp.json().get('content', []) if b.get('type') == 'text')
             else:
@@ -3046,7 +3046,7 @@ def blog_auto_post(platform):
             if anthropic_key:
                 resp = req.post('https://api.anthropic.com/v1/messages',
                     headers={'x-api-key': anthropic_key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json'},
-                    json={'model': 'claude-sonnet-4-20250514', 'max_tokens': 4096, 'system': BLOG_SYSTEM_PROMPT,
+                    json={'model': 'claude-sonnet-4-6', 'max_tokens': 4096, 'system': BLOG_SYSTEM_PROMPT,
                           'messages': [{'role': 'user', 'content': user_message}]}, timeout=60)
                 text = ''.join(b['text'] for b in resp.json().get('content', []) if b.get('type') == 'text')
             else:
@@ -3315,7 +3315,7 @@ def api_blog_generate():
                     'Content-Type': 'application/json'
                 },
                 json={
-                    'model': 'claude-sonnet-4-20250514',
+                    'model': 'claude-sonnet-4-6',
                     'max_tokens': 4096,
                     'system': BLOG_SYSTEM_PROMPT,
                     'messages': [{'role': 'user', 'content': user_message}]
@@ -3772,7 +3772,7 @@ def api_blog_generate_quora():
         if anthropic_key:
             resp = req.post('https://api.anthropic.com/v1/messages',
                 headers={'x-api-key': anthropic_key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json'},
-                json={'model': 'claude-sonnet-4-20250514', 'max_tokens': 1024, 'system': QUORA_SYSTEM_PROMPT,
+                json={'model': 'claude-sonnet-4-6', 'max_tokens': 1024, 'system': QUORA_SYSTEM_PROMPT,
                       'messages': [{'role': 'user', 'content': user_message}]}, timeout=30)
             text = ''.join(b['text'] for b in resp.json().get('content', []) if b.get('type') == 'text')
         else:
@@ -3830,7 +3830,7 @@ def api_blog_generate_reddit():
         if anthropic_key:
             resp = req.post('https://api.anthropic.com/v1/messages',
                 headers={'x-api-key': anthropic_key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json'},
-                json={'model': 'claude-sonnet-4-20250514', 'max_tokens': 1024, 'system': REDDIT_SYSTEM_PROMPT,
+                json={'model': 'claude-sonnet-4-6', 'max_tokens': 1024, 'system': REDDIT_SYSTEM_PROMPT,
                       'messages': [{'role': 'user', 'content': user_message}]}, timeout=30)
             text = ''.join(b['text'] for b in resp.json().get('content', []) if b.get('type') == 'text')
         else:
@@ -4460,8 +4460,49 @@ def api_customer_emails_export():
 
 
 # ============================================================
-# EMAIL CAMPAIGNS (SendGrid)
+# EMAIL CAMPAIGNS (SendGrid + Resend)
 # ============================================================
+
+def _get_email_provider():
+    """Return (provider_name, api_key, from_email) for the first configured email provider.
+    Checks Resend first (Brad already has RESEND_API_KEY), then falls back to SendGrid."""
+    resend_key = os.environ.get('RESEND_API_KEY', '')
+    resend_from = os.environ.get('RESEND_FROM_EMAIL', '')
+    if resend_key and resend_from:
+        return 'resend', resend_key, resend_from
+    sg_key = os.environ.get('SENDGRID_API_KEY', '')
+    sg_from = os.environ.get('SENDGRID_FROM_EMAIL', '')
+    if sg_key and sg_from:
+        return 'sendgrid', sg_key, sg_from
+    return None, '', ''
+
+
+def _send_single_email(provider, api_key, from_email, to_email, subject, html_body):
+    """Send a single transactional email via Resend or SendGrid. Returns (success, error)."""
+    import requests as req
+    try:
+        if provider == 'resend':
+            resp = req.post('https://api.resend.com/emails',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json={'from': f'Forbidden Bourbon <{from_email}>',
+                      'to': [to_email], 'subject': subject, 'html': html_body},
+                timeout=15)
+            if resp.status_code in (200, 201, 202):
+                return True, None
+            return False, f'Resend error {resp.status_code}: {resp.text[:200]}'
+        else:  # sendgrid
+            resp = req.post('https://api.sendgrid.com/v3/mail/send',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json={'personalizations': [{'to': [{'email': to_email}]}],
+                      'from': {'email': from_email, 'name': 'Forbidden Bourbon'},
+                      'subject': subject,
+                      'content': [{'type': 'text/html', 'value': html_body}]},
+                timeout=15)
+            if resp.status_code in (200, 201, 202):
+                return True, None
+            return False, f'SendGrid error {resp.status_code}: {resp.text[:200]}'
+    except Exception as e:
+        return False, str(e)
 
 @app.route('/api/email/campaigns', methods=['GET'])
 def api_get_email_campaigns():
@@ -4485,8 +4526,7 @@ def api_create_email_campaign():
     emails = db.get_customer_emails()
     recipient_count = len(emails)
     
-    sendgrid_key = os.environ.get('SENDGRID_API_KEY', '')
-    from_email = os.environ.get('SENDGRID_FROM_EMAIL', '')
+    provider, api_key, from_email = _get_email_provider()
     
     # Create campaign record
     campaign_id = db.create_email_campaign(
@@ -4499,54 +4539,28 @@ def api_create_email_campaign():
         return jsonify({'error': 'Failed to create campaign'}), 500
     
     if send_now:
-        if not sendgrid_key or not from_email:
+        if not provider:
             return jsonify({
                 'campaign_id': campaign_id,
                 'status': 'draft',
-                'message': 'Campaign saved as draft. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL env vars on Render to enable sending.',
+                'message': 'Campaign saved as draft. Set RESEND_API_KEY + RESEND_FROM_EMAIL (or SENDGRID_API_KEY + SENDGRID_FROM_EMAIL) in Render env vars to enable sending.',
                 'recipient_count': recipient_count
             })
         
-        # Send via SendGrid
+        # Send individually via the configured provider
         import requests as req
         sent = 0
         failed = 0
         
-        # Send in batches of 50 using personalizations
-        batch_size = 50
-        for i in range(0, len(emails), batch_size):
-            batch = emails[i:i + batch_size]
-            personalizations = []
-            for e in batch:
-                personalizations.append({
-                    'to': [{'email': e['email']}]
-                })
-            
-            try:
-                resp = req.post('https://api.sendgrid.com/v3/mail/send',
-                    headers={
-                        'Authorization': f'Bearer {sendgrid_key}',
-                        'Content-Type': 'application/json'
-                    },
-                    json={
-                        'personalizations': personalizations,
-                        'from': {'email': from_email, 'name': 'Forbidden Bourbon'},
-                        'subject': subject,
-                        'content': [
-                            {'type': 'text/html', 'value': body}
-                        ]
-                    },
-                    timeout=30
-                )
-                
-                if resp.status_code in (200, 201, 202):
-                    sent += len(batch)
-                else:
-                    failed += len(batch)
-                    print(f"[Email] SendGrid error: {resp.status_code} - {resp.text}")
-            except Exception as e:
-                failed += len(batch)
-                print(f"[Email] Send error: {e}")
+        for e in emails:
+            ok, err = _send_single_email(provider, api_key, from_email, e['email'], subject, body)
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+                print(f"[Email] Failed to send to {e['email']}: {err}")
+        
+        # Sends one email per recipient via the configured provider (Resend or SendGrid)
         
         db.update_email_campaign(campaign_id,
             status='sent',
@@ -4571,48 +4585,32 @@ def api_create_email_campaign():
 
 @app.route('/api/email/test', methods=['POST'])
 def api_test_email():
-    """Send a test email to verify setup"""
+    """Send a test email to verify setup (uses Resend if configured, else SendGrid)"""
     data = request.get_json()
     test_email = data.get('email', '')
     subject = data.get('subject', 'Test Email from Forbidden Bourbon')
     body = data.get('body', '<h2>Test Email</h2><p>Your email sending is working!</p>')
     
-    sendgrid_key = os.environ.get('SENDGRID_API_KEY', '')
-    from_email = os.environ.get('SENDGRID_FROM_EMAIL', '')
-    
-    if not sendgrid_key or not from_email:
-        return jsonify({'error': 'SENDGRID_API_KEY and SENDGRID_FROM_EMAIL not configured'}), 400
+    provider, api_key, from_email = _get_email_provider()
+    if not provider:
+        return jsonify({'error': 'No email provider configured. Set RESEND_API_KEY + RESEND_FROM_EMAIL (or SENDGRID_API_KEY + SENDGRID_FROM_EMAIL) in Render env vars.'}), 400
     if not test_email:
         return jsonify({'error': 'Test email address required'}), 400
     
-    import requests as req
-    try:
-        resp = req.post('https://api.sendgrid.com/v3/mail/send',
-            headers={'Authorization': f'Bearer {sendgrid_key}', 'Content-Type': 'application/json'},
-            json={
-                'personalizations': [{'to': [{'email': test_email}]}],
-                'from': {'email': from_email, 'name': 'Forbidden Bourbon'},
-                'subject': subject,
-                'content': [{'type': 'text/html', 'value': body}]
-            }, timeout=15)
-        
-        if resp.status_code in (200, 201, 202):
-            return jsonify({'success': True, 'message': f'Test email sent to {test_email}'})
-        else:
-            return jsonify({'error': f'SendGrid error: {resp.status_code}', 'details': resp.text}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    success, error = _send_single_email(provider, api_key, from_email, test_email, subject, body)
+    if success:
+        return jsonify({'success': True, 'message': f'Test email sent to {test_email} via {provider.title()}'})
+    return jsonify({'error': error}), 400
 
 
 @app.route('/api/email/status', methods=['GET'])
 def api_email_status():
     """Check if email sending is configured"""
-    sendgrid_key = os.environ.get('SENDGRID_API_KEY', '')
-    from_email = os.environ.get('SENDGRID_FROM_EMAIL', '')
+    provider, api_key, from_email = _get_email_provider()
     return jsonify({
-        'configured': bool(sendgrid_key and from_email),
+        'configured': bool(provider),
         'from_email': from_email if from_email else 'Not set',
-        'provider': 'SendGrid'
+        'provider': provider.title() if provider else 'None'
     })
 
 
