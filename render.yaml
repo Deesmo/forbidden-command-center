@@ -5,13 +5,64 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120
     envVars:
+      # Core
       - key: SECRET_KEY
         generateValue: true
+      - key: DATABASE_URL
+        sync: false
+
+      # AI Generation
       - key: OPENAI_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: RUNWAY_API_KEY
         sync: false
-      - key: DATABASE_URL
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: LUMA_API_KEY
+        sync: false
+      - key: KLING_AK
+        sync: false
+      - key: KLING_SK
+        sync: false
+      - key: REMOVE_BG_API_KEY
+        sync: false
+
+      # Blog Publishing
+      - key: MEDIUM_TOKEN
+        sync: false
+      - key: WORDPRESS_SITE
+        sync: false
+      - key: WORDPRESS_TOKEN
+        sync: false
+      - key: BLOGGER_BLOG_ID
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      # Social Platforms
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USERNAME
+        sync: false
+      - key: REDDIT_PASSWORD
+        sync: false
+      - key: PINTEREST_TOKEN
+        sync: false
+
+      # Email
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+
+      # Analytics
+      - key: GA4_PROPERTY_ID
+        sync: false
+      - key: GA4_CREDENTIALS_JSON
         sync: false
