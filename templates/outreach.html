@@ -672,11 +672,11 @@ function checkEmailConfig() {
         if (data.configured) {
             el.style.background = 'rgba(74,222,128,0.1)';
             el.style.border = '1px solid rgba(74,222,128,0.3)';
-            el.innerHTML = '<span style="color: #4ade80;">✓ SendGrid connected</span> · Sending from: <strong>' + data.from_email + '</strong>';
+            el.innerHTML = '<span style="color: #4ade80;">✓ ' + (data.provider || 'Email') + ' connected</span> · Sending from: <strong>' + data.from_email + '</strong>';
         } else {
             el.style.background = 'rgba(251,146,60,0.1)';
             el.style.border = '1px solid rgba(251,146,60,0.3)';
-            el.innerHTML = '<span style="color: #fb923c;">⚠ SendGrid not configured</span> · Add <code>SENDGRID_API_KEY</code> and <code>SENDGRID_FROM_EMAIL</code> to Render env vars. Campaigns will save as drafts until configured.';
+            el.innerHTML = '<span style="color: #fb923c;">⚠ Email not configured</span> · Add <code>RESEND_API_KEY</code> + <code>RESEND_FROM_EMAIL</code> (or SendGrid equivalents) to Render env vars. Campaigns will save as drafts until configured.';
         }
     });
 }
