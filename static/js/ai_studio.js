@@ -20,52 +20,52 @@ window.BRAND_DETAIL = "The Forbidden Bourbon bottle is an art-deco geometric dec
 /* ── fallback image prompts ── */
 window.IMAGE_PROMPTS_FALLBACK = {
   product: [
-    "Dark marble surface, dramatic side lighting, smoky atmosphere",
-    "Polished oak bar top, warm amber spotlights, blurred bar background",
-    "Black slate surface with scattered ice crystals, rim lighting",
-    "Aged leather desk, brass lamp, old books, warm library glow",
-    "Raw wooden barrel top, dark moody warehouse background",
-    "Clean white marble pedestal, studio lighting, luxury feel"
+    "Polished obsidian black marble counter, single concentrated warm amber spotlight from directly above creating a focused pool of light, ultra-shallow depth of field, scattered warm golden bokeh lights in deep background, atmospheric haze catching the light, commercial spirits photography",
+    "Jet black seamless studio backdrop, dramatic dual rim lighting in warm gold from both sides creating edge highlights, polished dark reflective surface beneath, subtle smoke wisps drifting through the beam, luxury product photography setup",
+    "Dark polished granite surface with natural veining, warm overhead pendant light creating a sharp spotlight circle, deep black negative space around, crystal decanter blurred in far background, premium spirits editorial lighting",
+    "Matte black surface with single dramatic sidelight casting long warm shadows, atmospheric dust particles visible in the light beam, deep contrast between light and shadow, minimalist luxury aesthetic, commercial photography",
+    "Dark brushed metal surface, three warm amber spotlights from above at different heights creating layered illumination, subtle reflection on surface, clean modern luxury environment, no clutter",
+    "Polished black mirror surface creating perfect reflection, single warm overhead spotlight, absolute darkness everywhere else, smoke tendrils rising slowly, ultra-premium product photography aesthetic"
   ],
   lifestyle: [
-    "Cozy fireside setting, warm orange glow, leather armchair visible",
-    "Outdoor porch at golden hour sunset, Kentucky rolling hills",
-    "Upscale restaurant table, candlelight, bokeh city lights behind",
-    "Rustic cabin interior, stone fireplace, wool blanket draped nearby",
-    "Gentleman's study with globe, dark wood shelving, warm lamplight",
-    "Summer evening patio, string lights, warm breeze atmosphere"
+    "Dramatic dark environment with warm fireplace glow casting amber light from behind, polished dark wood surface, leather wingback chair edge visible in soft bokeh, old world gentleman library atmosphere, single overhead warm spotlight on surface center, shallow depth of field",
+    "Upscale speakeasy interior, dark walnut wood surfaces, crystal glassware hanging overhead catching warm light, amber pendant lighting creating bokeh, polished dark marble bar counter, atmospheric moody lighting, luxury after-dark vibe",
+    "Private cigar lounge, deep mahogany paneling, warm sconce lighting creating golden pools, leather club chair armrest visible at edge, dark polished table surface, wisps of smoke in warm light, exclusive members-only atmosphere",
+    "Kentucky distillery tasting room, charred oak barrel used as table surface, warm golden light filtering through aged wooden shutters, copper still visible in bokeh background, heritage bourbon atmosphere, shallow depth of field",
+    "Candlelit private dining alcove, dark velvet curtains framing the background, polished black table surface with warm reflections, crystal wine glasses in soft focus nearby, intimate luxury dining atmosphere, warm amber color palette",
+    "Rooftop lounge at twilight, polished dark stone surface, city skyline lights creating warm bokeh behind, single warm overhead spotlight, sophisticated urban nightlife setting, golden hour fading to blue hour"
   ],
   artdeco: [
-    "Art deco geometric gold and black background, 1920s pattern",
-    "Speakeasy interior, velvet curtains, brass fixtures, moody lighting",
-    "Gold leaf textured wall, dramatic spotlight from above",
-    "Gatsby-era black marble with gold geometric inlays",
-    "Ornate gold frame on dark wall, gallery spotlight",
-    "Black lacquer surface with gold flake accents, luxury aesthetic"
+    "1920s speakeasy interior with dark polished bar, brass Art Deco fixtures catching warm light, beveled mirrors creating depth, dark green velvet and gold accents, single warm spotlight from ornate ceiling fixture, moody Prohibition-era atmosphere",
+    "Art Deco black marble surface with gold geometric inlays, dramatic overhead spotlight creating sharp light pool, dark mirrored wall behind with gold chevron pattern in soft focus, Gatsby-era luxury, warm amber color temperature",
+    "Grand hotel bar with Art Deco columns, dark lacquered surface with gold trim, crystal chandelier creating warm bokeh above, polished brass rail in foreground, 1920s elegance and opulence, theatrical lighting",
+    "Dark Art Deco lounge with geometric gold ceiling pattern casting patterned shadows, polished black onyx surface, warm spotlight from brass fixture above, velvet and gold everywhere in soft background, jazz-age sophistication",
+    "Ornate gold-framed mirror behind dark marble surface creating infinite depth, Art Deco geometric wall sconces casting warm angular light patterns, black and gold color palette, old money luxury atmosphere",
+    "Sleek black lacquer surface with inlaid gold leaf Art Deco sunburst pattern, dramatic single sidelight creating long shadows, dark mirrored background with warm reflections, timeless 1920s glamour"
   ],
   cocktail: [
-    "Bar setup with Old Fashioned ingredients: orange peel, cherry, bitters",
-    "Cocktail prep station: muddler, jigger, ice sphere, crystal glass",
-    "Mint Julep scene: crushed ice, silver cup, fresh mint sprigs",
-    "Whiskey Sour setup: lemon, egg white, cherry, shaker",
-    "Summer bar scene: ice bucket, citrus slices, copper tools",
-    "Cheese and charcuterie board, walnut cutting board, warm lighting"
+    "Polished dark marble bar counter with Old Fashioned ingredients artfully arranged: Luxardo cherry, orange peel curl, crystal mixing glass, gold jigger, large clear ice sphere — all in soft focus, warm overhead bar lighting, single clear spot for the bottle in center",
+    "Mixologist's station: dark walnut bar surface, copper barware catching warm light, fresh citrus and herbs in soft focus, crystal rocks glasses nearby, atmospheric bar lighting with warm bokeh, space cleared in center for hero product",
+    "After-hours cocktail bar, dark polished surface with condensation droplets catching light, crystal coupe glass in soft bokeh nearby, warm amber backlighting from shelved bottles behind, intimate late-night atmosphere",
+    "Whiskey tasting flight setup: dark slate board with three crystal nosing glasses in soft focus, warm overhead spotlight illuminating center surface, tasting notes card barely visible, premium spirits tasting room atmosphere",
+    "Kentucky Derby scene: silver mint julep cups in soft background, crushed ice glistening, fresh mint sprigs, dark polished wooden surface, warm golden afternoon light, Southern hospitality luxury",
+    "Dark stone surface with charcuterie board edge visible in background, aged cheese and dark chocolate in soft focus, warm candlelight creating intimate atmosphere, food and spirits pairing editorial setup"
   ],
   social: [
-    "Instagram-worthy flat lay: leather, watch, cigar, glasses",
-    "Gift box scene: velvet lined box, ribbon, holiday setting",
-    "Poolside luxury: marble edge, blue water, tropical plants",
-    "Weekend brunch table, newspaper, coffee, warm morning light",
-    "Party scene: confetti, gold accents, celebration mood",
-    "Campfire glow, night sky, rustic outdoor setting"
+    "Elegant flat lay on dark leather surface: luxury watch, premium cigar in ashtray, dark sunglasses, all in soft focus framing center space — warm overhead spotlight, Instagram editorial aesthetic, shallow depth of field",
+    "Premium gift box scene: dark velvet-lined box, gold ribbon, dark tissue paper, warm holiday lighting creating bokeh, polished dark surface, luxury unboxing moment, aspirational gifting aesthetic",
+    "Dark poolside marble edge at golden hour, turquoise water blurred in background creating color contrast with warm amber tones, tropical plants in soft focus, summer luxury lifestyle, warm natural light",
+    "Dark wood desk with leather journal, fountain pen, and reading glasses in soft focus, warm desk lamp creating focused pool of light, study atmosphere, thoughtful weekend moment, premium lifestyle",
+    "New Year's celebration: dark polished surface, gold confetti and streamers in soft focus, champagne flutes catching warm light nearby, midnight celebration mood, aspirational party scene",
+    "Campfire ember glow illuminating a dark rustic wooden surface, starry night sky visible in deep background bokeh, outdoor wilderness luxury, warm firelight creating dramatic shadows"
   ],
   editorial: [
-    "Magazine-style dark gradient backdrop, professional studio lighting",
-    "Kentucky bourbon country landscape, rolling hills, golden hour",
-    "Barrel aging warehouse, rows of oak barrels, shaft of light",
-    "Close-up textured background: charred oak, grain detail",
-    "Copper still room, industrial distillery equipment, steam",
-    "Wheat field at golden hour, Kentucky countryside"
+    "Professional studio with infinite black backdrop, three-point lighting setup: warm key light from above, cool fill from left, warm rim from right, polished dark plexiglass surface creating mirror reflection, magazine cover photography",
+    "Kentucky bourbon country: weathered oak fence in foreground with rolling green hills and golden sunset behind, warm afternoon light, editorial landscape setting with dark surface in immediate foreground for product placement",
+    "Barrel aging warehouse interior, rows of charred oak barrels stretching into darkness, single shaft of warm golden light cutting through, barrel top surface in foreground, heritage and craftsmanship narrative, editorial documentary style",
+    "Extreme close-up textured background: charred oak stave grain detail filling the background, warm sidelight creating texture shadows, dark polished surface in foreground, tactile craft story, macro editorial photography",
+    "Copper pot still room in working distillery, industrial copper equipment catching warm light, steam rising, dark concrete surface in foreground, artisan production atmosphere, documentary editorial lighting",
+    "Kentucky wheat field at golden hour, dark wooden fence post surface in immediate foreground, warm sun backlighting the grain, editorial landscape photography, amber and gold color palette throughout"
   ]
 };
 
@@ -100,16 +100,16 @@ window.VIDEO_PROMPTS_FALLBACK = {
     "Cinematic lens flare sweeps across the bottle as light source moves behind it"
   ],
   bar: [
-    "Bartender crafting a cocktail, moody lighting",
-    "Sliding bourbon glass down a polished bar",
-    "Ice placed into glass, then bourbon poured",
-    "Two glasses clinking in warm ambiance"
+    "Slow cinematic dolly along a polished dark marble bar, warm amber backlighting from shelved bottles, atmospheric haze, bottle centered and fully in frame throughout, luxury cocktail bar atmosphere",
+    "Camera slowly slides left to right past crystal barware catching warm light, bottle stays centered as foreground elements pass in soft focus, moody speakeasy atmosphere",
+    "Warm spotlight slowly intensifies on the bottle sitting on dark bar surface, bokeh bar lights gently shift in background, subtle condensation glistens, intimate nightclub atmosphere",
+    "Bartender's hands in soft focus placing a crystal glass next to the bottle, warm overhead lighting, cinematic shallow depth of field, slow deliberate motion"
   ],
   nature: [
-    "Sunrise over Kentucky bourbon country",
-    "Wheat swaying in warm breeze, golden hour",
-    "Oak barrel in a field with morning fog",
-    "Rain on barrel warehouse roof, cozy interior"
+    "Golden hour sunlight slowly sweeps across a weathered oak surface, warm lens flare builds from the right side, Kentucky rolling hills in soft bokeh background, bottle stays centered and sharp",
+    "Morning mist slowly drifts through a bourbon rickhouse, shafts of warm light gradually illuminate the scene, bottle on barrel top in sharp focus, atmospheric and cinematic",
+    "Camera slowly cranes down from charred oak barrel tops to reveal the bottle, warm golden light filtering through warehouse gaps, dust particles floating in light beams",
+    "Gentle Kentucky breeze moves wheat stalks in soft background bokeh while bottle sits steady on dark fence post surface in foreground, golden hour light warming the scene"
   ]
 };
 
