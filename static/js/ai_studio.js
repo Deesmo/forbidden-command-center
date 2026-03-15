@@ -372,6 +372,20 @@ window.generateImage = function () {
       document.getElementById("favBtn").textContent = "⭐ Favorite";
       document.getElementById("favBtn").style.background = "";
       var modelMsg = data.model ? " (" + data.model + ")" : "";
+      // Show quality score badge if available
+      var qualityBadge = document.getElementById("qualityBadge");
+      if (qualityBadge) qualityBadge.remove();
+      if (data.quality_score) {
+        var badge = document.createElement("div");
+        badge.id = "qualityBadge";
+        var color = data.quality_score >= 9 ? "#22c55e" : data.quality_score >= 8 ? "#eab308" : "#ef4444";
+        badge.style.cssText = "position:absolute;top:12px;right:12px;background:" + color + ";color:#fff;padding:4px 10px;border-radius:16px;font-weight:700;font-size:0.9rem;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,0.3);";
+        badge.textContent = data.quality_score.toFixed(1) + "/10";
+        if (data.quality_feedback) badge.title = data.quality_feedback;
+        var imgParent = document.getElementById("generatedImage").parentElement;
+        imgParent.style.position = "relative";
+        imgParent.appendChild(badge);
+      }
       window.toast("Image generated!" + modelMsg, "success");
       try { window.loadRecentGallery(); } catch(e) {}
     })

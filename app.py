@@ -1150,6 +1150,69 @@ def _get_bottle_cutout(source_path, api_key=None):
         return PILImage.open(source_path).convert('RGBA')
 
 
+def _rate_composite(image_pil, api_key, prompt=''):
+    """
+    Rate a composite image 1-10 using GPT-4o vision.
+    Returns (score: float, feedback: str). Defaults to 7.0 on failure.
+    """
+    import requests as req
+    import base64 as b64
+    import io
+    try:
+        buf = io.BytesIO()
+        image_pil.convert('RGB').save(buf, format='JPEG', quality=85)
+        img_b64 = b64.b64encode(buf.getvalue()).decode('utf-8')
+
+        rating_prompt = (
+            "You are a luxury spirits advertising art director. Rate this product composite image "
+            "on a scale of 1.0 to 10.0 for social media campaign readiness.\n\n"
+            "Score based on:\n"
+            "- Lighting consistency (does bottle lighting match scene lighting?)\n"
+            "- Edge quality (clean cutout edges, no halos or artifacts?)\n"
+            "- Shadow/reflection realism (natural contact shadows?)\n"
+            "- Overall premium feel (does it look like a real photoshoot?)\n"
+            "- Composition quality (balanced, professional framing?)\n\n"
+            "Respond ONLY with a JSON object: {\"score\": 8.5, \"feedback\": \"brief reason\"}\n"
+            "Nothing else. Just the JSON."
+        )
+
+        resp = req.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json={
+                'model': 'gpt-4o',
+                'messages': [
+                    {'role': 'user', 'content': [
+                        {'type': 'text', 'text': rating_prompt},
+                        {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{img_b64}', 'detail': 'low'}}
+                    ]}
+                ],
+                'max_tokens': 100,
+                'temperature': 0.1,
+            },
+            timeout=30
+        )
+        if resp.status_code == 200:
+            import json
+            content = resp.json()['choices'][0]['message']['content'].strip()
+            # Parse JSON from response (handle markdown wrapping)
+            if '```' in content:
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+            result = json.loads(content)
+            score = float(result.get('score', 7.0))
+            feedback = result.get('feedback', '')
+            print(f"[Quality Gate] Score: {score}/10 — {feedback}")
+            return score, feedback
+        else:
+            print(f"[Quality Gate] Rating API failed ({resp.status_code}): {resp.text[:200]}")
+            return 7.0, 'Rating unavailable'
+    except Exception as e:
+        print(f"[Quality Gate] Rating exception: {e}")
+        return 7.0, 'Rating unavailable'
+
+
 def _composite_bottle_on_bg(bottle_cutout, background_img, position='center', scale=0.72):
     """
     Composite a transparent-background bottle cutout onto an AI background.
@@ -1479,45 +1542,89 @@ def api_generate_image():
             background_img = _do_background()
         
         # =====================================================
-        # STEP 3: AI COMPOSITE — gpt-image-1.5 Edit with both images
-        # Handles lighting match, contact shadows, surface reflections.
-        # Falls back to PIL composite if Edit API fails.
+        # STEP 3: AI COMPOSITE with QUALITY GATE (9+ or retry)
+        # Up to 3 attempts: generate composite → rate via GPT-4o → keep if 9+
         # =====================================================
         if bottle_cutout and background_img:
             final = None
             composite_method = None
+            best_score = 0
+            best_final = None
+            best_method = None
+            best_feedback = ''
+            MAX_ATTEMPTS = 3
+            QUALITY_THRESHOLD = 9.0
 
-            # --- PRIMARY: AI composite via Edit API ---
-            try:
-                final = _ai_composite_bottle_on_bg(
-                    bottle_cutout, background_img,
-                    api_key=api_key,
-                    size=gpt_size,
-                    quality=quality if quality in ('low', 'medium', 'high') else 'high',
-                    position=bottle_position,
-                    scale=float(bottle_scale or 0.65)
-                )
-                if final:
-                    composite_method = f'ai-composite-edit+rembg ({bottle_type})'
-            except Exception as e:
-                import traceback
-                errors.append(f"AI Composite: {str(e)[:200]}")
-                print(f"[AI Studio] AI composite exception: {traceback.format_exc()}")
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                print(f"[Quality Gate] Attempt {attempt}/{MAX_ATTEMPTS}")
+                attempt_final = None
+                attempt_method = None
 
-            # --- FALLBACK: PIL composite ---
-            if final is None:
-                print(f"[AI Studio] AI composite failed — falling back to PIL composite")
+                # If attempt > 1, regenerate background with slightly varied prompt
+                if attempt > 1:
+                    print(f"[Quality Gate] Regenerating background for attempt {attempt}...")
+                    background_img = _do_background()
+                    if not background_img:
+                        errors.append(f"Background regen failed on attempt {attempt}")
+                        continue
+
+                # --- PRIMARY: AI composite via Edit API ---
                 try:
-                    final = _composite_bottle_on_bg(
+                    attempt_final = _ai_composite_bottle_on_bg(
                         bottle_cutout, background_img,
+                        api_key=api_key,
+                        size=gpt_size,
+                        quality=quality if quality in ('low', 'medium', 'high') else 'high',
                         position=bottle_position,
-                        scale=float(bottle_scale or 0.72)
+                        scale=float(bottle_scale or 0.65)
                     )
-                    composite_method = f'pil-composite-fallback+rembg ({bottle_type})'
+                    if attempt_final:
+                        attempt_method = f'ai-composite-edit+rembg ({bottle_type})'
                 except Exception as e:
                     import traceback
-                    errors.append(f"PIL Composite fallback: {str(e)[:200]}")
-                    print(f"[AI Studio] PIL fallback exception: {traceback.format_exc()}")
+                    errors.append(f"AI Composite attempt {attempt}: {str(e)[:200]}")
+                    print(f"[AI Studio] AI composite exception: {traceback.format_exc()}")
+
+                # --- FALLBACK: PIL composite ---
+                if attempt_final is None:
+                    print(f"[AI Studio] AI composite failed — falling back to PIL composite")
+                    try:
+                        attempt_final = _composite_bottle_on_bg(
+                            bottle_cutout, background_img,
+                            position=bottle_position,
+                            scale=float(bottle_scale or 0.72)
+                        )
+                        attempt_method = f'pil-composite-fallback+rembg ({bottle_type})'
+                    except Exception as e:
+                        import traceback
+                        errors.append(f"PIL Composite fallback attempt {attempt}: {str(e)[:200]}")
+                        continue
+
+                if not attempt_final:
+                    continue
+
+                # --- QUALITY GATE: Rate with GPT-4o vision ---
+                score, feedback = _rate_composite(attempt_final, api_key, prompt)
+
+                if score > best_score:
+                    best_score = score
+                    best_final = attempt_final
+                    best_method = attempt_method
+                    best_feedback = feedback
+
+                if score >= QUALITY_THRESHOLD:
+                    print(f"[Quality Gate] ✅ Passed on attempt {attempt}: {score}/10")
+                    break
+                else:
+                    print(f"[Quality Gate] ❌ Below threshold on attempt {attempt}: {score}/10 (need {QUALITY_THRESHOLD}+)")
+
+            # Use best result regardless (even if below threshold after 3 tries)
+            final = best_final
+            composite_method = best_method
+            if best_score > 0:
+                composite_method = f'{best_method} [rated {best_score}/10]'
+                if best_score < QUALITY_THRESHOLD:
+                    errors.append(f"Quality gate: best score {best_score}/10 after {MAX_ATTEMPTS} attempts — {best_feedback}")
 
             if final:
                 filename = f"ai-composite-{int(time_module.time())}.png"
@@ -1615,6 +1722,8 @@ def api_generate_image():
             'model': model_used,
             'used_reference': bool(bottle_cutout and background_img),
             'gallery_id': _save_gallery_id,
+            'quality_score': best_score if use_reference and bottle_cutout and background_img else None,
+            'quality_feedback': best_feedback if use_reference and bottle_cutout and background_img else None,
             'debug_errors': errors  # visible in browser devtools network tab
         })
     
