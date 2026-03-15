@@ -1,2 +1,8 @@
 static.zip
 gunicorn.conf.zip
+command_center.db
+command_center.db-shm
+command_center.db-wal
+*.db
+*.db-shm
+*.db-wal
