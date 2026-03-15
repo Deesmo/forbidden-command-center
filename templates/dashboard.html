@@ -221,9 +221,19 @@
             <div style="font-size: 1.05rem; color: var(--text-muted);">Topics</div>
         </div>
     </div>
+    {% set has_blog_platform = false %}
+    {% for p in platforms if p.name in ['wordpress', 'blogger', 'medium'] and p.connected %}
+        {% set has_blog_platform = true %}
+    {% endfor %}
+    {% if blog_stats.total > 0 and has_blog_platform %}
     <div style="font-size: 1.05rem; color: #4ade80; text-align: center; padding: 6px; background: rgba(74,222,128,0.06); border-radius: 6px;">
-        ● Auto-posting active — Mon/Wed/Fri blogs, Tue/Thu Reddit
+        ● Publishing active — {{ blog_stats.total }} articles across connected platforms
     </div>
+    {% elif blog_stats.topics > 0 %}
+    <div style="font-size: 1.05rem; color: var(--text-muted); text-align: center; padding: 6px; background: rgba(138,155,184,0.06); border-radius: 6px;">
+        {{ blog_stats.topics }} topics ready · <a href="/blog-hub" style="color: var(--gold);">Generate your first article →</a>
+    </div>
+    {% endif %}
 </div>
 
 <!-- ACTIVITY FEED -->

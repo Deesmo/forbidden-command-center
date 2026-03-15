@@ -41,7 +41,7 @@
         <button onclick="testPlatform('{{ p.name }}')">🔄 Test</button>
         <button onclick="disconnectPlatform('{{ p.name }}')" style="color:#ff6b6b;">Disconnect</button>
         {% else %}
-        <button onclick="showToast('Set API credentials in Render env vars for {{ p.display_name }}', 'info')">Setup Guide</button>
+        <button onclick="showSetup('{{ p.name }}', '{{ p.display_name }}')">Setup Guide</button>
         {% endif %}
     </div>
 </div>
@@ -66,7 +66,42 @@
     </div>
 </div>
 
+<!-- Setup Modal -->
+<div id="setupModal" style="display:none; position:fixed; inset:0; background:rgba(6,10,22,0.92); z-index:1000; display:none; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:16px; padding:24px; max-width:460px; width:100%;">
+        <h3 id="setupTitle" style="color:var(--gold); font-family:'Cormorant Garamond',serif; margin:0 0 12px 0;">Setup</h3>
+        <div id="setupBody" style="color:var(--text-secondary); font-size:0.9rem; line-height:1.6;"></div>
+        <div style="margin-top:16px; text-align:right;">
+            <button onclick="closeSetup()" style="padding:8px 20px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); cursor:pointer;">Close</button>
+        </div>
+    </div>
+</div>
+
 <script>
+var setupGuides = {
+    'twitter': {title: '𝕏 Twitter / X', body: '<p>Twitter API v2 requires a Developer account.</p><ol><li>Go to <a href="https://developer.twitter.com" target="_blank" style="color:var(--gold);">developer.twitter.com</a></li><li>Create a project with OAuth 1.0a (read + write)</li><li>Get your API Key, API Secret, Access Token, Access Secret</li><li>Ask Lucius to add them to Render env vars</li></ol>'},
+    'bluesky': {title: '🦋 Bluesky', body: '<p>Bluesky uses app passwords.</p><ol><li>Go to Settings → App Passwords in Bluesky</li><li>Create a new app password</li><li>Tell Lucius your handle + app password to configure</li></ol>'},
+    'facebook': {title: 'f Facebook', body: '<p>Facebook Pages API requires a Meta Developer App.</p><ol><li>Create an app at <a href="https://developers.facebook.com" target="_blank" style="color:var(--gold);">developers.facebook.com</a></li><li>Add Facebook Pages API permissions</li><li>Generate a long-lived page access token</li><li>Ask Lucius to add it to Render</li></ol>'},
+    'linkedin': {title: 'in LinkedIn', body: '<p>LinkedIn requires an OAuth app with posting permissions.</p><ol><li>Create an app at <a href="https://developer.linkedin.com" target="_blank" style="color:var(--gold);">developer.linkedin.com</a></li><li>Request Share on LinkedIn scope</li><li>Get an access token and tell Lucius</li></ol>'},
+    'instagram': {title: '📷 Instagram', body: '<p>Instagram posting requires a Facebook Business account linked to your Instagram.</p><ol><li>Set up Facebook first (above)</li><li>Link your Instagram Business account</li><li>The same Facebook Page token enables Instagram posting</li></ol>'},
+    'medium': {title: '📝 Medium', body: '<p>Medium uses integration tokens.</p><ol><li>Go to Medium → Settings → Security and apps → Integration tokens</li><li>Create a new token</li><li>Tell Lucius the token to configure</li></ol>'},
+    'wordpress': {title: '📰 WordPress', body: '<p>WordPress.com uses application passwords.</p><ol><li>In WordPress.com: Users → Security → Application Passwords</li><li>Create a new password</li><li>Tell Lucius your site URL + the password</li></ol>'},
+    'blogger': {title: '📢 Blogger', body: '<p>Blogger is connected via Google OAuth.</p><ol><li>Visit <a href="/auth/blogger/start" style="color:var(--gold);">Connect Blogger</a> to authorize</li><li>Sign in with your Google account that owns the blog</li><li>Allow access — done!</li></ol>'},
+    'reddit': {title: '🤖 Reddit', body: '<p>Reddit requires an OAuth app.</p><ol><li>Go to <a href="https://www.reddit.com/prefs/apps" target="_blank" style="color:var(--gold);">reddit.com/prefs/apps</a></li><li>Create a "script" type app</li><li>Tell Lucius the client ID, secret, and your Reddit username/password</li></ol>'},
+    'pinterest': {title: '📌 Pinterest', body: '<p>Pinterest requires a Business account + API access.</p><ol><li>Convert to a Business account at <a href="https://business.pinterest.com" target="_blank" style="color:var(--gold);">business.pinterest.com</a></li><li>Create an app in the Pinterest Developer portal</li><li>Generate an access token and tell Lucius</li></ol>'},
+    'quora': {title: '❓ Quora', body: '<p>Quora doesn\'t have a public API. Posts are manual.</p><ol><li>Write your content in Compose</li><li>Copy and paste into Quora directly</li><li>The Command Center tracks it as "Manual" status</li></ol>'}
+};
+
+function showSetup(name, displayName) {
+    var guide = setupGuides[name] || {title: displayName, body: '<p>Ask Lucius to help configure ' + displayName + '.</p>'};
+    document.getElementById('setupTitle').textContent = guide.title + ' Setup';
+    document.getElementById('setupBody').innerHTML = guide.body;
+    var modal = document.getElementById('setupModal');
+    modal.style.display = 'flex';
+}
+function closeSetup() { document.getElementById('setupModal').style.display = 'none'; }
+document.getElementById('setupModal').addEventListener('click', function(e) { if (e.target === this) closeSetup(); });
+
 async function testPlatform(name) {
     showToast('Testing ' + name + '...', 'info');
     try {

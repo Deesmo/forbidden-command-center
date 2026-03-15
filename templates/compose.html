@@ -191,6 +191,13 @@ async function submitPost(status) {
     document.querySelectorAll('.platform-check input:checked').forEach(function(cb) { platforms.push(cb.value); });
     formData.append('platforms', JSON.stringify(platforms));
     
+    // Warn if posting with no platforms selected
+    if (status === 'published' && platforms.length === 0) {
+        if (!confirm('No platforms selected — this will save as a draft instead of publishing. Continue?')) return;
+        status = 'draft';
+        formData.set('status', 'draft');
+    }
+    
     if (selectedPhoto) formData.append('media_url', selectedPhoto);
     
     var fileInput = document.getElementById('mediaUpload');

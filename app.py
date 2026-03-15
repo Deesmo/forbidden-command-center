@@ -412,6 +412,23 @@ def templates_page():
 @app.route('/platforms')
 def platforms_page():
     platforms = db.get_platforms()
+    
+    # Sync platform connected status with env vars (same logic as dashboard)
+    env_platform_map = {
+        'medium': 'MEDIUM_TOKEN',
+        'wordpress': 'WORDPRESS_TOKEN',
+        'reddit': 'REDDIT_CLIENT_ID',
+        'pinterest': 'PINTEREST_TOKEN',
+    }
+    for p in platforms:
+        env_var = env_platform_map.get(p['name'])
+        if env_var and os.environ.get(env_var, ''):
+            p['connected'] = True
+        if p['name'] == 'blogger':
+            blogger_token = db.get_oauth_token('blogger')
+            if blogger_token and blogger_token.get('refresh_token'):
+                p['connected'] = True
+    
     # Get AI platform status
     openai_p = db.get_platform('openai')
     runway_p = db.get_platform('runway')
