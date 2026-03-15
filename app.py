@@ -4903,7 +4903,7 @@ def api_apollo_search():
         }
 
         resp = req.post(
-            'https://api.apollo.io/api/v1/mixed_people/search',
+            'https://api.apollo.io/api/v1/mixed_people/api_search',
             headers={'X-Api-Key': APOLLO_API_KEY, 'Content-Type': 'application/json'},
             json=payload,
             timeout=30
