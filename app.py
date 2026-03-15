@@ -4912,17 +4912,22 @@ def api_apollo_search():
         if resp.status_code == 200:
             result = resp.json()
             people = result.get('people', [])
-            total = result.get('pagination', {}).get('total_entries', 0)
+            # Free plan may not return pagination; fall back to people count
+            total = result.get('pagination', {}).get('total_entries', len(people))
 
             # Format for frontend
             prospects = []
             for p in people:
                 org = p.get('organization', {}) or {}
+                last = p.get('last_name', '')
+                # Free plan obfuscates last names — show what we have
+                first = p.get('first_name', '')
+                full_name = f"{first} {last}".strip() if last and '*' not in last else first
                 prospects.append({
                     'apollo_id': p.get('id', ''),
-                    'first_name': p.get('first_name', ''),
-                    'last_name': p.get('last_name', ''),
-                    'name': f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+                    'first_name': first,
+                    'last_name': last,
+                    'name': full_name,
                     'title': p.get('title', ''),
                     'email': p.get('email', ''),  # May be None until enriched
                     'email_status': p.get('email_status', ''),
