@@ -1748,16 +1748,19 @@ def api_generate_video():
             prompt = _DEFAULT_VIDEO_PROMPT
             print(f"[Video] Using default brand prompt")
         else:
-            # Enforce no-pour and no-glass constraints on all prompts
-            constraints = []
-            if 'pour' not in prompt.lower():
-                constraints.append("no liquid pouring")
-            if 'glass' not in prompt.lower():
-                constraints.append("no glass")
-            constraints.append("bottle stays fully in frame")
-            if constraints:
-                prompt = prompt + ", " + ", ".join(constraints)
-            print(f"[Video] Using user prompt (enhanced)")
+            # HARD CONSTRAINTS: prevent nonsensical AI hallucinations
+            # These are ALWAYS appended regardless of user prompt
+            hard_constraints = [
+                "bottle cap stays sealed at all times",
+                "absolutely NO liquid pouring or flowing",
+                "NO hands or people appear",
+                "NO glasses or cups appear",
+                "bottle stays fully in frame at all times",
+                "bottle remains stationary on the surface",
+                "ONLY the camera moves — the bottle is static"
+            ]
+            prompt = prompt + ". CRITICAL CONSTRAINTS: " + ", ".join(hard_constraints) + "."
+            print(f"[Video] Using user prompt (enhanced with hard constraints)")
 
         import requests as req
 
