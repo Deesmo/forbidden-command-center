@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0b1426">
+    <title>Login — Forbidden Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="https://cdn.prod.website-files.com/647792c571ec2048ea841bfd/64814befceaac1f82252cc31_logo-forbidden.svg">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #080e1c;
+            color: #f0ece4;
+            font-family: 'DM Sans', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: #101d35;
+            border: 1px solid #1a2f50;
+            border-radius: 16px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .login-card img {
+            width: 60px;
+            height: 60px;
+            margin-bottom: 24px;
+            opacity: 0.9;
+        }
+        .login-card h1 {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: #c8a45e;
+            margin-bottom: 8px;
+        }
+        .login-card p {
+            color: #8a9bb8;
+            font-size: 0.9rem;
+            margin-bottom: 32px;
+        }
+        .login-card input[type="password"] {
+            width: 100%;
+            padding: 14px 18px;
+            background: #0a1325;
+            border: 1px solid #1a2f50;
+            border-radius: 10px;
+            color: #f0ece4;
+            font-size: 1rem;
+            font-family: 'DM Sans', sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
+            margin-bottom: 16px;
+        }
+        .login-card input[type="password"]:focus {
+            border-color: #c8a45e;
+        }
+        .login-card button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #c8a45e 0%, #a88a3e 100%);
+            border: none;
+            border-radius: 10px;
+            color: #080e1c;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: 'DM Sans', sans-serif;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .login-card button:hover { opacity: 0.9; }
+        .error {
+            background: rgba(196, 78, 78, 0.15);
+            color: #c44e4e;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <img src="https://cdn.prod.website-files.com/647792c571ec2048ea841bfd/64814befceaac1f82252cc31_logo-forbidden.svg" alt="Forbidden">
+        <h1>Command Center</h1>
+        <p>Enter your password to continue</p>
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="error">{{ messages[0] }}</div>
+        {% endif %}
+        {% endwith %}
+        <form method="POST">
+            <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
+            <button type="submit">Enter</button>
+        </form>
+    </div>
+</body>
+</html>

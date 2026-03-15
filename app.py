@@ -1,12 +1,13 @@
-# Forbidden Bourbon Command Center v15c — Model update + Resend email + REMOVEBG fix
+# Forbidden Bourbon Command Center v16 — Auth Gate + Security Hardening
 import os
 import json
 import threading
 import time as time_module
 import random
+import functools
 from datetime import datetime, timedelta
 from flask import (Flask, render_template, request, jsonify, redirect, 
-                   url_for, flash, send_from_directory)
+                   url_for, flash, send_from_directory, session)
 from werkzeug.utils import secure_filename
 
 import database as db
@@ -15,6 +16,45 @@ from publisher import publish_to_platform, PublishResult
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'forbidden-command-center-2025')
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = not os.environ.get('FLASK_DEBUG', False)
+
+# ============================================================
+# AUTHENTICATION — Password gate for entire app
+# Set ADMIN_PASSWORD env var on Render to enable
+# ============================================================
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+
+@app.before_request
+def require_login():
+    """Block all unauthenticated requests when ADMIN_PASSWORD is set."""
+    if not ADMIN_PASSWORD:
+        return  # No password = dev mode, allow all
+    if request.path == '/login' or request.path.startswith('/static/'):
+        return
+    if session.get('authenticated'):
+        return
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+    return redirect('/login')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        if password == ADMIN_PASSWORD:
+            session['authenticated'] = True
+            session.permanent = True
+            app.permanent_session_lifetime = timedelta(days=30)
+            return redirect('/')
+        flash('Incorrect password', 'error')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/login')
 
 # Upload config
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
