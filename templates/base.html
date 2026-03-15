@@ -167,8 +167,9 @@
             font-size: 1.1rem;
             font-weight: 600;
             color: var(--text-primary);
-            letter-spacing: 0.05em;
+            letter-spacing: 0.08em;
             text-transform: uppercase;
+            white-space: nowrap;
         }
 
         .top-nav .logo-text span {
@@ -277,16 +278,18 @@
             order: 3; /* Center it: Dashboard(1), Queue(2), Compose(3), Templates(4), Platforms(5), Analytics(6) */
         }
 
-        /* Reorder nav items for mobile */
+        /* Reorder nav items for mobile — most-used first */
         .bottom-nav a:nth-child(2) { order: 1; } /* Dashboard */
-        .bottom-nav a:nth-child(3) { order: 2; } /* Queue */
-        .bottom-nav a:nth-child(4) { order: 4; } /* Templates */
-        .bottom-nav a:nth-child(5) { order: 5; } /* Platforms */
-        .bottom-nav a:nth-child(6) { order: 6; } /* Mash Data */
-        .bottom-nav a:nth-child(7) { order: 7; } /* Photos */
-        .bottom-nav a:nth-child(8) { order: 8; } /* AI Studio */
-        .bottom-nav a:nth-child(8) { order: 8; } /* AI Studio */
-        .bottom-nav a:nth-child(8) { order: 8; } /* Creative */
+        .bottom-nav a:nth-child(8) { order: 2; } /* AI Studio — moved up */
+        .bottom-nav a:nth-child(3) { order: 4; } /* Queue */
+        .bottom-nav a:nth-child(10) { order: 5; } /* Blog Hub */
+        .bottom-nav a:nth-child(12) { order: 6; } /* Outreach */
+        .bottom-nav a:nth-child(11) { order: 7; } /* Brand Intel */
+        .bottom-nav a:nth-child(7) { order: 8; } /* Photos */
+        .bottom-nav a:nth-child(4) { order: 9; } /* Templates */
+        .bottom-nav a:nth-child(5) { order: 10; } /* Platforms */
+        .bottom-nav a:nth-child(6) { order: 11; } /* Mash Data */
+        .bottom-nav a:nth-child(9) { order: 12; } /* Guide */
 
         .bottom-nav a.compose-btn:hover {
             box-shadow: 0 4px 24px rgba(200, 164, 94, 0.5), 0 0 50px rgba(200, 164, 94, 0.15);
@@ -549,7 +552,7 @@
             margin-bottom: 6px;
         }
 
-        .form-input, .form-textarea, .form-select {
+        .form-input, .form-textarea, .form-select, .form-control {
             width: 100%;
             padding: 12px 14px;
             background: var(--bg-input);
@@ -560,9 +563,10 @@
             font-size: 1rem;
             transition: border-color 0.2s, box-shadow 0.2s;
             -webkit-appearance: none;
+            box-sizing: border-box;
         }
 
-        .form-input:focus, .form-textarea:focus, .form-select:focus {
+        .form-input:focus, .form-textarea:focus, .form-select:focus, .form-control:focus {
             outline: none;
             border-color: var(--gold-dark);
             box-shadow: 0 0 0 3px var(--gold-glow);
@@ -1244,8 +1248,8 @@
             opacity: 1;
         }
 
-        .quick-action .qa-icon { font-size: 1.3rem; margin-bottom: 6px; }
-        .quick-action .qa-label { font-size: 1.05rem; font-weight: 600; }
+        .quick-action .qa-icon { font-size: 1.5rem; margin-bottom: 8px; line-height: 1; }
+        .quick-action .qa-label { font-size: 0.9rem; font-weight: 600; letter-spacing: 0.03em; }
 
         /* ============================================
            SCROLLBAR

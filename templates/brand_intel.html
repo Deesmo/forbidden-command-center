@@ -67,7 +67,7 @@
 <div id="mentionsList">
     {% if mentions %}
     {% for m in mentions %}
-    <div class="card mention-card" style="margin-bottom: 10px;" data-type="{{ m.source_type }}" data-starred="{{ m.starred }}" id="mention-{{ m.id }}">
+    <div class="card mention-card{% if loop.index > 20 %} mention-hidden{% endif %}" style="margin-bottom: 10px;{% if loop.index > 20 %} display: none;{% endif %}" data-type="{{ m.source_type }}" data-starred="{{ m.starred }}" data-idx="{{ loop.index }}" id="mention-{{ m.id }}">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
             <div style="flex: 1; cursor: pointer;" onclick="toggleMention({{ m.id }})">
                 <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
@@ -111,6 +111,13 @@
         </div>
     </div>
     {% endfor %}
+    {% if mentions|length > 20 %}
+    <div id="showMoreBtn" style="text-align: center; padding: 16px;">
+        <button class="btn btn-primary" onclick="showMoreMentions()" style="padding: 10px 32px; font-size: 0.95rem;">
+            Show More <span id="hiddenCount">({{ mentions|length - 20 }} more)</span>
+        </button>
+    </div>
+    {% endif %}
     {% else %}
     <div class="card" style="text-align: center; padding: 32px;">
         <div style="font-size: 2.5rem; margin-bottom: 10px;">🔍</div>
@@ -152,6 +159,17 @@
 
 <script>
 let currentFilter = 'all';
+let mentionsExpanded = false;
+
+function showMoreMentions() {
+    mentionsExpanded = true;
+    document.querySelectorAll('.mention-hidden').forEach(card => {
+        card.style.display = '';
+        card.classList.remove('mention-hidden');
+    });
+    const btn = document.getElementById('showMoreBtn');
+    if (btn) btn.style.display = 'none';
+}
 
 function filterMentions(type, btn) {
     document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
@@ -161,9 +179,17 @@ function filterMentions(type, btn) {
     document.getElementById('mentionsList').classList.remove('hidden');
     document.getElementById('addView').classList.add('hidden');
     
+    // When filtering, show all cards (expand) so filter results aren't hidden
+    if (type !== 'all' && !mentionsExpanded) showMoreMentions();
+    
     document.querySelectorAll('.mention-card').forEach(card => {
         if (type === 'all') {
-            card.style.display = '';
+            // Respect pagination if not expanded
+            if (!mentionsExpanded && card.classList.contains('mention-hidden')) {
+                card.style.display = 'none';
+            } else {
+                card.style.display = '';
+            }
         } else if (type === 'starred') {
             card.style.display = card.dataset.starred === '1' ? '' : 'none';
         } else {
