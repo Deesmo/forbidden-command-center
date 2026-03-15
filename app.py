@@ -4812,19 +4812,31 @@ def api_apollo_status():
     try:
         import requests as req
         # Get organization info (includes credits)
+        # Check health + get org details for credits
         resp = req.get(
             'https://api.apollo.io/api/v1/auth/health',
             headers={'X-Api-Key': APOLLO_API_KEY, 'Content-Type': 'application/json'},
             timeout=10
         )
-        if resp.status_code == 200:
-            data = resp.json()
+        health_ok = resp.status_code == 200
+        health_data = resp.json() if health_ok else {}
+
+        # Also try to get organization/credits info
+        org_resp = req.get(
+            'https://api.apollo.io/api/v1/organizations/current_usage',
+            headers={'X-Api-Key': APOLLO_API_KEY, 'Content-Type': 'application/json'},
+            timeout=10
+        )
+        org_data = org_resp.json() if org_resp.status_code == 200 else {}
+
+        if health_ok:
             return jsonify({
                 'connected': True,
-                'plan': data.get('plan', {}).get('name', 'Unknown'),
-                'credits_used': data.get('current_usage', {}).get('credits_used', 0),
-                'credits_limit': data.get('current_usage', {}).get('credits_limit', 0),
-                'raw': data
+                'healthy': health_data.get('healthy', True),
+                'plan': org_data.get('organization', {}).get('plan_name', 'Unknown'),
+                'credits_used': org_data.get('credits_used', 0),
+                'credits_limit': org_data.get('credits_limit', 0),
+                'monthly_credits_used': org_data.get('monthly_credits_used', 0),
             })
         else:
             return jsonify({'connected': False, 'error': f'Apollo returned {resp.status_code}'})
@@ -4882,7 +4894,6 @@ def api_apollo_search():
         config = lane_configs.get(lane, lane_configs['wholesale'])
 
         payload = {
-            'api_key': APOLLO_API_KEY,
             'page': page,
             'per_page': per_page,
             'person_titles': config['person_titles'],
@@ -4893,6 +4904,7 @@ def api_apollo_search():
 
         resp = req.post(
             'https://api.apollo.io/api/v1/mixed_people/search',
+            headers={'X-Api-Key': APOLLO_API_KEY, 'Content-Type': 'application/json'},
             json=payload,
             timeout=30
         )
@@ -4954,7 +4966,8 @@ def api_apollo_enrich():
 
         resp = req.post(
             'https://api.apollo.io/api/v1/people/match',
-            json={'api_key': APOLLO_API_KEY, 'id': apollo_id, 'reveal_personal_emails': True},
+            headers={'X-Api-Key': APOLLO_API_KEY, 'Content-Type': 'application/json'},
+            json={'id': apollo_id, 'reveal_personal_emails': True},
             timeout=15
         )
 
