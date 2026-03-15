@@ -5003,26 +5003,27 @@ def api_apollo_import():
         }
         category = lane_to_category.get(lane, 'industry')
 
-        # Check for duplicate
-        existing = db.execute_query(
-            "SELECT id FROM outreach_contacts WHERE name = ? OR email = ?",
-            (name, email)
-        )
-        if existing:
-            return jsonify({'success': False, 'error': 'Contact already exists in outreach'})
-
-        # Insert
+        # Build notes
         notes = f"Apollo import · {title} at {company}"
         if phone:
             notes += f" · Phone: {phone}"
         notes += f" · Lane: {lane}"
 
-        contact_id = db.execute_insert(
-            """INSERT INTO outreach_contacts 
-               (name, email, platform, platform_handle, platform_url, followers, category, tier, notes, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (name, email, 'Apollo', title, linkedin_url, 0, category, 1, notes, 'new')
+        # Use existing db function (handles duplicate checking)
+        contact_id = db.add_outreach_contact(
+            name=name,
+            email=email,
+            platform='Apollo',
+            platform_handle=title,
+            platform_url=linkedin_url,
+            followers=0,
+            category=category,
+            tier='1',
+            notes=notes
         )
+
+        if contact_id is None:
+            return jsonify({'success': False, 'error': 'Contact already exists in outreach'})
 
         return jsonify({'success': True, 'contact_id': contact_id, 'message': f'{name} imported to outreach'})
 
