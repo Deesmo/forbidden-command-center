@@ -88,6 +88,84 @@
     </div>
 </div>
 
+<!-- APOLLO PROSPECTING -->
+<div class="card" style="margin-bottom: 16px; padding: 16px; border: 1px solid rgba(139,92,57,0.4); background: linear-gradient(135deg, rgba(139,92,57,0.08), rgba(139,92,57,0.02));">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div>
+            <h3 style="margin: 0; color: #c8a45e; font-family: 'Cormorant Garamond', serif; font-size: 1.2rem;">🚀 Apollo Prospecting</h3>
+            <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: var(--text-muted);">Search 275M+ contacts · Enrich emails · Import to outreach</p>
+        </div>
+        <div id="apolloStatusBadge" style="padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600;">
+            {% if apollo_connected %}
+            <span style="background: rgba(74,222,128,0.15); color: #4ade80; padding: 4px 10px; border-radius: 12px;">✓ Connected</span>
+            {% else %}
+            <span style="background: rgba(251,146,60,0.15); color: #fb923c; padding: 4px 10px; border-radius: 12px;">⚠ Not configured</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if apollo_connected %}
+    <!-- Lane Selector -->
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;">
+        <button class="apollo-lane active" data-lane="wholesale" onclick="selectApolloLane('wholesale', this)" style="padding: 10px 8px; background: linear-gradient(135deg, rgba(200,164,94,0.15), rgba(200,164,94,0.05)); border: 1px solid rgba(200,164,94,0.4); border-radius: 8px; color: var(--gold); font-size: 0.85rem; cursor: pointer; text-align: center;">
+            <div style="font-size: 1.2rem;">🥃</div>
+            <div style="font-weight: 600;">Wholesale</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">The Pour</div>
+        </button>
+        <button class="apollo-lane" data-lane="partnerships" onclick="selectApolloLane('partnerships', this)" style="padding: 10px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); font-size: 0.85rem; cursor: pointer; text-align: center;">
+            <div style="font-size: 1.2rem;">🤝</div>
+            <div style="font-weight: 600;">Partnerships</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">The Collaboration</div>
+        </button>
+        <button class="apollo-lane" data-lane="media" onclick="selectApolloLane('media', this)" style="padding: 10px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); font-size: 0.85rem; cursor: pointer; text-align: center;">
+            <div style="font-size: 1.2rem;">📰</div>
+            <div style="font-weight: 600;">Media</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">The Story</div>
+        </button>
+    </div>
+
+    <!-- Search Controls -->
+    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button id="apolloSearchBtn" onclick="apolloSearch()" class="btn btn-primary" style="flex: 1; background: linear-gradient(135deg, #c8a45e, #a0823c);">🔍 Search Prospects</button>
+        <button onclick="apolloShowSequences()" class="btn" style="background: rgba(168,85,247,0.15); color: #a855f7; border: 1px solid rgba(168,85,247,0.3);">📋 Sequences</button>
+    </div>
+
+    <!-- Sequence Info Panel -->
+    <div id="apolloSequencePanel" class="hidden" style="margin-bottom: 12px; padding: 12px; background: rgba(168,85,247,0.06); border: 1px solid rgba(168,85,247,0.2); border-radius: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 id="seqTitle" style="margin: 0; color: #a855f7; font-size: 0.95rem;">Sequence</h4>
+            <button onclick="document.getElementById('apolloSequencePanel').classList.add('hidden')" style="background: none; border: none; color: var(--text-muted); cursor: pointer;">✕</button>
+        </div>
+        <div id="seqSteps" style="font-size: 0.85rem;"></div>
+    </div>
+
+    <!-- Results -->
+    <div id="apolloResults" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span id="apolloResultCount" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+            <span id="apolloCreditNote" style="font-size: 0.75rem; color: var(--text-muted);"></span>
+        </div>
+        <div id="apolloProspectList"></div>
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+            <button id="apolloPrevBtn" onclick="apolloSearch(window._apolloPage - 1)" class="btn btn-sm" style="flex: 1;" disabled>← Prev</button>
+            <button id="apolloNextBtn" onclick="apolloSearch(window._apolloPage + 1)" class="btn btn-sm" style="flex: 1;">Next →</button>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="apolloLoading" class="hidden" style="text-align: center; padding: 20px;">
+        <div class="ai-spinner"></div>
+        <p style="color: var(--text-muted); margin-top: 8px; font-size: 0.9rem;">Searching Apollo...</p>
+    </div>
+
+    {% else %}
+    <div style="padding: 16px; text-align: center;">
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 8px;">Set <code>APOLLO_API_KEY</code> in Render env vars to enable prospecting.</p>
+        <p style="color: var(--text-muted); font-size: 0.85rem;">Search 275M+ contacts, reveal emails, and build your outreach pipeline — all from this dashboard.</p>
+    </div>
+    {% endif %}
+</div>
+
 <!-- B2B OUTREACH STATS -->
 <div style="margin-bottom: 12px;">
     <h3 style="color: var(--gold); font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; margin: 0;">🎯 B2B Outreach Contacts</h3>
@@ -783,6 +861,181 @@ async function saveCampaignDraft() {
         loadCampaignHistory();
     } catch (err) { showToast('Error saving draft', 'error'); }
 }
+
+// ============================================================
+// APOLLO PROSPECTING
+// ============================================================
+window._apolloLane = 'wholesale';
+window._apolloPage = 1;
+
+function selectApolloLane(lane, btn) {
+    window._apolloLane = lane;
+    window._apolloPage = 1;
+    document.querySelectorAll('.apollo-lane').forEach(b => {
+        b.style.background = 'var(--bg-input)';
+        b.style.borderColor = 'var(--border)';
+        b.style.color = 'var(--text-secondary)';
+        b.classList.remove('active');
+    });
+    btn.style.background = 'linear-gradient(135deg, rgba(200,164,94,0.15), rgba(200,164,94,0.05))';
+    btn.style.borderColor = 'rgba(200,164,94,0.4)';
+    btn.style.color = 'var(--gold)';
+    btn.classList.add('active');
+    document.getElementById('apolloResults').style.display = 'none';
+}
+
+async function apolloSearch(page) {
+    page = page || 1;
+    window._apolloPage = page;
+    var btn = document.getElementById('apolloSearchBtn');
+    var loading = document.getElementById('apolloLoading');
+    btn.disabled = true;
+    btn.textContent = 'Searching...';
+    loading.classList.remove('hidden');
+    document.getElementById('apolloResults').style.display = 'none';
+
+    try {
+        var resp = await fetch('/api/apollo/search', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ lane: window._apolloLane, page: page, per_page: 25 })
+        });
+        var data = await safeJSON(resp);
+        if (data.success) {
+            renderApolloResults(data);
+        } else {
+            showToast(data.error || 'Search failed', 'error');
+        }
+    } catch(e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = '🔍 Search Prospects';
+    loading.classList.add('hidden');
+}
+
+function renderApolloResults(data) {
+    var container = document.getElementById('apolloProspectList');
+    var results = document.getElementById('apolloResults');
+    results.style.display = 'block';
+    document.getElementById('apolloResultCount').textContent = data.total.toLocaleString() + ' prospects found · Page ' + data.page;
+    document.getElementById('apolloCreditNote').textContent = data.credits_note || '';
+
+    if (!data.prospects || !data.prospects.length) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:16px;">No prospects found for this lane.</p>';
+        return;
+    }
+
+    var html = '';
+    data.prospects.forEach(function(p) {
+        var emailBadge = p.has_email
+            ? '<span style="font-size:0.75rem;background:rgba(74,222,128,0.15);color:#4ade80;padding:1px 6px;border-radius:8px;">📧 ' + (p.email || 'Email available') + '</span>'
+            : '<span style="font-size:0.75rem;background:rgba(251,146,60,0.15);color:#fb923c;padding:1px 6px;border-radius:8px;">🔒 Needs enrichment</span>';
+
+        var actions = '';
+        if (!p.has_email) {
+            actions += '<button onclick="apolloEnrich(\'' + p.apollo_id + '\', this)" class="btn btn-sm" style="font-size:0.8rem;padding:4px 10px;background:rgba(96,165,250,0.15);color:#60a5fa;border:1px solid rgba(96,165,250,0.3);">🔓 Reveal Email (1 credit)</button> ';
+        }
+        actions += '<button onclick="apolloImport(\'' + encodeURIComponent(JSON.stringify(p)) + '\')" class="btn btn-sm" style="font-size:0.8rem;padding:4px 10px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);">＋ Import</button>';
+
+        html += '<div class="card" style="margin-bottom:8px;padding:10px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;">';
+        html += '<div style="flex:1;">';
+        html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px;">';
+        html += '<strong style="color:var(--text-primary);font-size:0.95rem;">' + p.name + '</strong> ' + emailBadge;
+        html += '</div>';
+        html += '<div style="font-size:0.85rem;color:var(--text-muted);">' + p.title + (p.company ? ' · ' + p.company : '') + '</div>';
+        if (p.city || p.state) html += '<div style="font-size:0.8rem;color:var(--text-muted);">📍 ' + [p.city, p.state].filter(Boolean).join(', ') + '</div>';
+        html += '</div></div>';
+        html += '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' + actions + '</div>';
+        html += '</div>';
+    });
+    container.innerHTML = html;
+
+    document.getElementById('apolloPrevBtn').disabled = data.page <= 1;
+    document.getElementById('apolloNextBtn').disabled = data.prospects.length < 25;
+}
+
+async function apolloEnrich(apolloId, btn) {
+    var origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Enriching...';
+    try {
+        var resp = await fetch('/api/apollo/enrich', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ apollo_id: apolloId })
+        });
+        var data = await safeJSON(resp);
+        if (data.success && data.email) {
+            btn.textContent = '📧 ' + data.email;
+            btn.style.background = 'rgba(74,222,128,0.15)';
+            btn.style.color = '#4ade80';
+            btn.style.borderColor = 'rgba(74,222,128,0.3)';
+            btn.onclick = function() { copyText(data.email); };
+            showToast('Email revealed: ' + data.email, 'success');
+        } else if (data.success && !data.email) {
+            btn.textContent = '❌ No email found';
+            btn.style.color = '#f87171';
+            showToast('No email available for this contact', 'error');
+        } else {
+            btn.textContent = origText;
+            btn.disabled = false;
+            showToast(data.error || 'Enrichment failed', 'error');
+        }
+    } catch(e) {
+        btn.textContent = origText;
+        btn.disabled = false;
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+function apolloImport(encodedData) {
+    var p = JSON.parse(decodeURIComponent(encodedData));
+    fetch('/api/apollo/import-to-outreach', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            name: p.name,
+            email: p.email || '',
+            title: p.title || '',
+            company: p.company || '',
+            lane: window._apolloLane,
+            linkedin_url: p.linkedin_url || '',
+            phone: p.phone || ''
+        })
+    }).then(safeJSON).then(function(data) {
+        if (data.success) {
+            showToast(p.name + ' imported to outreach!', 'success');
+        } else {
+            showToast(data.error || 'Import failed', 'error');
+        }
+    }).catch(function(e) { showToast('Error: ' + e.message, 'error'); });
+}
+
+async function apolloShowSequences() {
+    var panel = document.getElementById('apolloSequencePanel');
+    panel.classList.toggle('hidden');
+    if (panel.classList.contains('hidden')) return;
+
+    try {
+        var resp = await fetch('/api/apollo/sequences');
+        var data = await safeJSON(resp);
+        var seq = data.sequences[window._apolloLane];
+        if (seq) {
+            document.getElementById('seqTitle').textContent = seq.name + ' — ' + seq.lane + ' (' + seq.emails + ' emails, ' + seq.duration + ')';
+            var html = '';
+            seq.steps.forEach(function(s) {
+                html += '<div style="padding:6px 0;border-bottom:1px solid rgba(168,85,247,0.1);display:flex;justify-content:space-between;">';
+                html += '<span>Day ' + s.day + ': <strong>' + s.type + '</strong></span>';
+                html += '<span style="color:var(--text-muted);">' + s.subject + '</span>';
+                html += '</div>';
+            });
+            document.getElementById('seqSteps').innerHTML = html;
+        }
+    } catch(e) { showToast('Error loading sequences', 'error'); }
+}
+
+// ============================================================
+// EMAIL CAMPAIGN FUNCTIONS
+// ============================================================
 
 async function sendCampaign() {
     var subject = document.getElementById('campaignSubject').value;

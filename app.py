@@ -557,10 +557,12 @@ def outreach_page():
     contacts = db.get_outreach_contacts(limit=500)
     stats = db.get_outreach_stats()
     customer_email_count = db.get_customer_email_count()
+    apollo_connected = bool(os.environ.get('APOLLO_API_KEY', ''))
     return render_template('outreach.html',
                          contacts=contacts,
                          stats=stats,
                          customer_email_count=customer_email_count,
+                         apollo_connected=apollo_connected,
                          page='outreach')
 
 @app.route('/ai-studio')
@@ -4794,6 +4796,280 @@ def api_email_status():
         'from_email': from_email if from_email else 'Not set',
         'provider': provider.title() if provider else 'None'
     })
+
+
+# ============================================================
+# APOLLO OUTREACH INTEGRATION
+# ============================================================
+
+APOLLO_API_KEY = os.environ.get('APOLLO_API_KEY', '')
+
+@app.route('/api/apollo/status', methods=['GET'])
+def api_apollo_status():
+    """Check Apollo API connection and credit balance"""
+    if not APOLLO_API_KEY:
+        return jsonify({'connected': False, 'error': 'APOLLO_API_KEY not set in Render env vars'})
+    try:
+        import requests as req
+        # Get organization info (includes credits)
+        resp = req.get(
+            'https://api.apollo.io/api/v1/auth/health',
+            headers={'X-Api-Key': APOLLO_API_KEY, 'Content-Type': 'application/json'},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return jsonify({
+                'connected': True,
+                'plan': data.get('plan', {}).get('name', 'Unknown'),
+                'credits_used': data.get('current_usage', {}).get('credits_used', 0),
+                'credits_limit': data.get('current_usage', {}).get('credits_limit', 0),
+                'raw': data
+            })
+        else:
+            return jsonify({'connected': False, 'error': f'Apollo returned {resp.status_code}'})
+    except Exception as e:
+        return jsonify({'connected': False, 'error': str(e)})
+
+
+@app.route('/api/apollo/search', methods=['POST'])
+def api_apollo_search():
+    """Search Apollo for prospects by lane/criteria"""
+    if not APOLLO_API_KEY:
+        return jsonify({'success': False, 'error': 'APOLLO_API_KEY not configured'}), 400
+    try:
+        import requests as req
+        data = request.get_json()
+        lane = data.get('lane', 'wholesale')  # wholesale, partnerships, media
+        custom_titles = data.get('titles', [])
+        custom_keywords = data.get('keywords', [])
+        page = data.get('page', 1)
+        per_page = min(data.get('per_page', 25), 100)
+
+        # Pre-built lane configs
+        lane_configs = {
+            'wholesale': {
+                'person_titles': custom_titles or [
+                    'Beverage Director', 'Bar Manager', 'Spirits Buyer',
+                    'Wine and Spirits Director', 'Beverage Manager',
+                    'Liquor Store Manager', 'Head Bartender',
+                    'Food and Beverage Director', 'General Manager'
+                ],
+                'organization_industry_tag_ids': [],
+                'q_keywords': custom_keywords or ['bar', 'restaurant', 'spirits', 'liquor', 'cocktail', 'hospitality'],
+            },
+            'partnerships': {
+                'person_titles': custom_titles or [
+                    'Events Director', 'Brand Partnership Manager',
+                    'Sponsorship Manager', 'Marketing Director',
+                    'VP Marketing', 'Event Coordinator',
+                    'Corporate Events Manager', 'Brand Manager'
+                ],
+                'organization_industry_tag_ids': [],
+                'q_keywords': custom_keywords or ['events', 'spirits', 'bourbon', 'whiskey', 'hospitality', 'luxury'],
+            },
+            'media': {
+                'person_titles': custom_titles or [
+                    'Editor', 'Spirits Writer', 'Food and Drink Editor',
+                    'Bourbon Reviewer', 'Podcast Host', 'Content Creator',
+                    'Journalist', 'Features Editor', 'Drinks Editor'
+                ],
+                'organization_industry_tag_ids': [],
+                'q_keywords': custom_keywords or ['bourbon', 'whiskey', 'spirits', 'food and drink', 'beverage', 'review'],
+            },
+        }
+
+        config = lane_configs.get(lane, lane_configs['wholesale'])
+
+        payload = {
+            'api_key': APOLLO_API_KEY,
+            'page': page,
+            'per_page': per_page,
+            'person_titles': config['person_titles'],
+            'q_keywords': ' OR '.join(config['q_keywords']),
+            'person_locations': ['United States'],
+            'contact_email_status': ['likely_to_engage', 'verified'],
+        }
+
+        resp = req.post(
+            'https://api.apollo.io/api/v1/mixed_people/search',
+            json=payload,
+            timeout=30
+        )
+
+        if resp.status_code == 200:
+            result = resp.json()
+            people = result.get('people', [])
+            total = result.get('pagination', {}).get('total_entries', 0)
+
+            # Format for frontend
+            prospects = []
+            for p in people:
+                org = p.get('organization', {}) or {}
+                prospects.append({
+                    'apollo_id': p.get('id', ''),
+                    'first_name': p.get('first_name', ''),
+                    'last_name': p.get('last_name', ''),
+                    'name': f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+                    'title': p.get('title', ''),
+                    'email': p.get('email', ''),  # May be None until enriched
+                    'email_status': p.get('email_status', ''),
+                    'company': org.get('name', ''),
+                    'city': p.get('city', ''),
+                    'state': p.get('state', ''),
+                    'linkedin_url': p.get('linkedin_url', ''),
+                    'has_email': bool(p.get('email')),
+                    'phone': p.get('phone_numbers', [{}])[0].get('sanitized_number', '') if p.get('phone_numbers') else '',
+                })
+
+            return jsonify({
+                'success': True,
+                'prospects': prospects,
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'lane': lane,
+                'credits_note': 'Search is FREE. Enrichment (email reveal) costs 1 credit per person.'
+            })
+        else:
+            err = resp.text[:500]
+            return jsonify({'success': False, 'error': f'Apollo API error ({resp.status_code}): {err}'}), 500
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/apollo/enrich', methods=['POST'])
+def api_apollo_enrich():
+    """Enrich a prospect (reveal email) — costs 1 Apollo credit"""
+    if not APOLLO_API_KEY:
+        return jsonify({'success': False, 'error': 'APOLLO_API_KEY not configured'}), 400
+    try:
+        import requests as req
+        data = request.get_json()
+        apollo_id = data.get('apollo_id', '')
+
+        if not apollo_id:
+            return jsonify({'success': False, 'error': 'apollo_id required'}), 400
+
+        resp = req.post(
+            'https://api.apollo.io/api/v1/people/match',
+            json={'api_key': APOLLO_API_KEY, 'id': apollo_id, 'reveal_personal_emails': True},
+            timeout=15
+        )
+
+        if resp.status_code == 200:
+            person = resp.json().get('person', {})
+            return jsonify({
+                'success': True,
+                'email': person.get('email', ''),
+                'email_status': person.get('email_status', ''),
+                'first_name': person.get('first_name', ''),
+                'last_name': person.get('last_name', ''),
+                'title': person.get('title', ''),
+                'company': (person.get('organization', {}) or {}).get('name', ''),
+                'phone': person.get('phone_numbers', [{}])[0].get('sanitized_number', '') if person.get('phone_numbers') else '',
+                'linkedin_url': person.get('linkedin_url', ''),
+                'credits_used': 1,
+            })
+        else:
+            return jsonify({'success': False, 'error': f'Apollo enrichment failed ({resp.status_code})'}), 500
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/apollo/import-to-outreach', methods=['POST'])
+def api_apollo_import():
+    """Import enriched Apollo prospect into Command Center outreach contacts"""
+    try:
+        data = request.get_json()
+        name = data.get('name', '')
+        email = data.get('email', '')
+        title = data.get('title', '')
+        company = data.get('company', '')
+        lane = data.get('lane', 'wholesale')
+        linkedin_url = data.get('linkedin_url', '')
+        phone = data.get('phone', '')
+
+        if not name:
+            return jsonify({'success': False, 'error': 'Name required'}), 400
+
+        # Map lane to category
+        lane_to_category = {
+            'wholesale': 'industry',
+            'partnerships': 'adjacent',
+            'media': 'media',
+        }
+        category = lane_to_category.get(lane, 'industry')
+
+        # Check for duplicate
+        existing = db.execute_query(
+            "SELECT id FROM outreach_contacts WHERE name = ? OR email = ?",
+            (name, email)
+        )
+        if existing:
+            return jsonify({'success': False, 'error': 'Contact already exists in outreach'})
+
+        # Insert
+        notes = f"Apollo import · {title} at {company}"
+        if phone:
+            notes += f" · Phone: {phone}"
+        notes += f" · Lane: {lane}"
+
+        contact_id = db.execute_insert(
+            """INSERT INTO outreach_contacts 
+               (name, email, platform, platform_handle, platform_url, followers, category, tier, notes, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (name, email, 'Apollo', title, linkedin_url, 0, category, 1, notes, 'new')
+        )
+
+        return jsonify({'success': True, 'contact_id': contact_id, 'message': f'{name} imported to outreach'})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/apollo/sequences', methods=['GET'])
+def api_apollo_sequences():
+    """Get the pre-built email sequences for each lane"""
+    sequences = {
+        'wholesale': {
+            'name': 'The Pour',
+            'lane': 'B2B Wholesale',
+            'emails': 4,
+            'duration': '14 days',
+            'steps': [
+                {'day': 0, 'subject': 'A bourbon worth pouring — Forbidden Bourbon', 'type': 'Introduction'},
+                {'day': 4, 'subject': 'What people are saying about Forbidden', 'type': 'Social Proof'},
+                {'day': 8, 'subject': 'How {{similar_venue}} added Forbidden to their menu', 'type': 'Case Study'},
+                {'day': 14, 'subject': 'Last one from me, {{first_name}}', 'type': 'Soft Close'},
+            ]
+        },
+        'partnerships': {
+            'name': 'The Collaboration',
+            'lane': 'Partnerships & Events',
+            'emails': 3,
+            'duration': '10 days',
+            'steps': [
+                {'day': 0, 'subject': 'Forbidden Bourbon x {{company}} — Partnership?', 'type': 'Introduction'},
+                {'day': 5, 'subject': 'Ideas for Forbidden x {{company}}', 'type': 'Value Prop'},
+                {'day': 10, 'subject': 'Quick follow-up, {{first_name}}', 'type': 'Soft Close'},
+            ]
+        },
+        'media': {
+            'name': 'The Story',
+            'lane': 'Media & Influencers',
+            'emails': 3,
+            'duration': '10 days',
+            'steps': [
+                {'day': 0, 'subject': 'Story Pitch — Marianne Eaves & Forbidden Bourbon', 'type': 'Introduction'},
+                {'day': 5, 'subject': 'Forbidden Bourbon — press kit & samples', 'type': 'Resources'},
+                {'day': 10, 'subject': 'Still interested, {{first_name}}?', 'type': 'Soft Close'},
+            ]
+        }
+    }
+    return jsonify({'success': True, 'sequences': sequences})
 
 
 # ============================================================
