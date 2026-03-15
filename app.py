@@ -1694,6 +1694,7 @@ def api_generate_video():
         # Default to portrait (9:16) for Instagram Reels / TikTok / Shorts
         portrait = data.get('portrait', True)
         bottle_type = data.get('bottle_type', 'small_batch')  # 'small_batch' or 'single_barrel'
+        audio_style = data.get('audio_style', 'ambient')  # 'ambient', 'music', or 'none'
 
         # ── SOURCE IMAGE: prefer clean isolated bottle shots, avoid pre-composed lifestyle images ──
         # Small Batch (copper): S1110515-Edit.jpg (9/10 QA lifestyle bar shot) > SmallBatch1.jpg > Black_Front_LightBG_V1.png > bottle-ref.jpg
@@ -1964,17 +1965,17 @@ def api_ai_templates():
     video_templates = [
         # ── ORIGINAL 6 (kept for reference) ─────────────────────────────
         {'id': 'v_product_hero', 'label': 'Product Hero', 'category': 'product',
-         'prompt': 'Slow cinematic dolly push-in toward the Forbidden Bourbon bottle, warm amber bokeh background, dramatic side lighting catching the faceted glass, luxury spirits commercial, no pouring, bottle stays fully in frame'},
+         'prompt': 'Slow cinematic dolly push-in toward the sealed Forbidden Bourbon bottle on polished dark marble surface, warm amber spotlight intensifies as camera approaches, subtle golden bokeh lights in deep background, atmospheric haze catches the light, bottle stays perfectly centered and sealed throughout, luxury spirits commercial'},
         {'id': 'v_orbit', 'label': 'Bottle Orbit', 'category': 'product',
-         'prompt': 'Slow 180-degree orbit around Forbidden Bourbon bottle, camera level with label, dark moody background with rim lighting, luxury product reveal, smooth motion, no camera shake'},
+         'prompt': 'Slow smooth 180-degree clockwise orbit around stationary sealed Forbidden Bourbon bottle on dark reflective surface, warm golden spotlight from above, the light catches different faceted glass edges as the angle changes, dark moody atmosphere throughout, bottle remains perfectly still and sealed, luxury product reveal'},
         {'id': 'v_lifestyle', 'label': 'Speakeasy Mood', 'category': 'lifestyle',
-         'prompt': 'Forbidden Bourbon bottle in foreground on a dark mahogany bar, blurred warm speakeasy bar background with candles and bokeh, cinematic shallow depth of field, camera gently drifts left to right, no pour, no glass, bottle stays fully in frame'},
+         'prompt': 'Sealed Forbidden Bourbon bottle on polished dark marble bar counter, crystal chandeliers creating warm golden bokeh overhead, camera slowly drifts left to right past foreground crystal glassware in soft focus, bottle stays centered and sharp throughout, luxury speakeasy atmosphere, warm amber color temperature'},
         {'id': 'v_barrel', 'label': 'Barrel Room', 'category': 'heritage',
-         'prompt': 'Camera slowly pulls back from close-up of Forbidden Bourbon label to reveal a dark Kentucky rickhouse full of aging barrels, warm amber shafts of light through wood slats, dramatic and cinematic'},
+         'prompt': 'Camera slowly pulls back from close-up of sealed Forbidden Bourbon bottle label to reveal a dark Kentucky rickhouse, rows of aging barrels stretch into darkness, warm golden shafts of light filter through wooden slat walls, dust particles float in the light beams, cinematic heritage reveal'},
         {'id': 'v_fire', 'label': 'Fireplace Glow', 'category': 'lifestyle',
-         'prompt': 'Forbidden Bourbon bottle resting on a stone hearth, firelight flickering warm reflections across the faceted glass, intimate luxury scene, slow gentle camera drift, no pouring'},
+         'prompt': 'Sealed Forbidden Bourbon bottle on polished dark wood surface, warm fireplace glow casting amber light from behind, leather wingback chair visible in soft bokeh, slow gentle push-in toward the bottle, firelight dancing across the faceted glass edges, intimate luxury atmosphere'},
         {'id': 'v_smoke', 'label': 'Smokehouse', 'category': 'product',
-         'prompt': 'Forbidden Bourbon bottle surrounded by thin wisps of oak smoke drifting past in slow motion, jet black background, single dramatic spotlight from above, cinematic and moody'},
+         'prompt': 'Sealed Forbidden Bourbon bottle on dark stone surface, thin wisps of oak smoke drift slowly past in the foreground, jet black background, single dramatic warm spotlight from above, atmospheric haze catching the light, bottle remains stationary and centered, cinematic and moody'},
         # ── NEW 10 ────────────────────────────────────────────────────────
         {'id': 'v_gold_hero', 'label': 'Gold Edition Hero', 'category': 'product',
          'prompt': 'Gold Forbidden Bourbon Single Barrel bottle, slow dramatic push-in, jet black background with warm single overhead spotlight casting deep shadows on the faceted gold glass, luxury whiskey commercial'},
@@ -2453,10 +2454,11 @@ def api_finalize_video():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _auto_add_audio(raw_video_url, duration=10):
+def _auto_add_audio(raw_video_url, duration=10, audio_style='ambient'):
     """
-    Download a Runway/Luma CDN video, generate a branded ambient SFX track via
-    ElevenLabs, mux them with ffmpeg, and return a local /static/uploads/ URL.
+    Download a Runway/Luma CDN video, generate audio via ElevenLabs,
+    mux them with ffmpeg, and return a local /static/uploads/ URL.
+    audio_style: 'ambient' (bar atmosphere), 'music' (cinematic instrumental), 'none' (silent)
     Falls back to the original CDN URL if ElevenLabs key missing or any step fails.
     """
     import requests as req
@@ -2480,19 +2482,29 @@ def _auto_add_audio(raw_video_url, duration=10):
 
         out_path = os.path.join(uploads_dir, f'video_final_{uid}.mp4')
 
-        if not el_key:
-            # No ElevenLabs key — still save locally for persistent storage
+        if not el_key or audio_style == 'none':
+            # No ElevenLabs key or user wants silent — still save locally
             import shutil
             shutil.copy(vid_path, out_path)
             os.remove(vid_path)
-            print("[Audio] No ElevenLabs key — saved video without audio")
+            print(f"[Audio] {'No ElevenLabs key' if not el_key else 'Silent mode'} — saved video without audio")
             return f'/static/uploads/video_final_{uid}.mp4'
 
-        # Step 2: Generate branded ambient SFX via ElevenLabs
-        sfx_prompt = (
-            "Deep cinematic bourbon ambience — low resonant barrel hum, faint crackling fireplace, "
-            "subtle ambient whiskey atmosphere, moody luxury spirits commercial background, no music"
-        )
+        # Step 2: Generate audio via ElevenLabs based on style choice
+        audio_prompts = {
+            'ambient': (
+                "Quiet upscale cocktail bar ambience, soft jazz piano in background, "
+                "occasional gentle ice clinking in glass, warm intimate atmosphere, "
+                "low murmur of distant conversation, luxury lounge feel"
+            ),
+            'music': (
+                "Deep moody cinematic instrumental music, slow tempo, warm bass notes, "
+                "subtle strings building tension, luxury brand commercial soundtrack, "
+                "dark and sophisticated, no vocals, premium spirits advertising music"
+            ),
+        }
+        sfx_prompt = audio_prompts.get(audio_style, audio_prompts['ambient'])
+
         sfx_resp = req.post(
             'https://api.elevenlabs.io/v1/sound-generation',
             headers={'xi-api-key': el_key, 'Content-Type': 'application/json'},
@@ -2508,7 +2520,7 @@ def _auto_add_audio(raw_video_url, duration=10):
         sfx_path = os.path.join(uploads_dir, f'sfx_{uid}.mp3')
         with open(sfx_path, 'wb') as f:
             f.write(sfx_resp.content)
-        print(f"[Audio] SFX generated: {os.path.getsize(sfx_path)//1024}KB")
+        print(f"[Audio] {audio_style} audio generated: {os.path.getsize(sfx_path)//1024}KB")
 
         # Step 3: Mux video + audio with ffmpeg (-shortest trims audio to video length)
         result = subprocess.run([
@@ -2565,8 +2577,9 @@ def api_video_status(task_id):
                     output = result.get('output', [])
                     if output:
                         video_url = output[0] if isinstance(output, list) else output
-                        # Auto-add ElevenLabs ambient audio + save locally
-                        video_url = _auto_add_audio(video_url, duration=10)
+                        # Auto-add audio — style comes from query param (default: ambient)
+                        _audio_style = request.args.get('audio_style', 'ambient')
+                        video_url = _auto_add_audio(video_url, duration=10, audio_style=_audio_style)
                     _save_to_gallery('video', video_url, '', '')
                 return jsonify({'status': status, 'video_url': video_url, 'error': result.get('failure', None)})
             else:

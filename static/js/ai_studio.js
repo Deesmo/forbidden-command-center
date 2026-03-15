@@ -475,10 +475,13 @@ window.generateVideo = function () {
       ". Cinematic, luxury brand aesthetic, warm golden and dark tones.";
   }
 
-  var payload = { prompt: fullPrompt, duration: parseInt(duration) };
+  var audioStyleEl = document.getElementById("audioStyle");
+  var audioStyle = audioStyleEl ? audioStyleEl.value : "ambient";
+  var payload = { prompt: fullPrompt, duration: parseInt(duration), audio_style: audioStyle };
   if (sourceImage) {
     payload.source_image = window.location.origin + sourceImage;
   }
+  window._currentAudioStyle = audioStyle;
 
   fetch("/api/ai/generate-video", {
     method: "POST",
@@ -518,7 +521,8 @@ window.pollVideoStatus = function (taskId, provider) {
   provider = provider || 'runway';
   document.getElementById("videoStatus").textContent = "Processing video...";
   var interval = setInterval(function () {
-    fetch("/api/ai/video-status/" + taskId + "?provider=" + provider)
+    var _audioParam = window._currentAudioStyle ? "&audio_style=" + window._currentAudioStyle : "";
+    fetch("/api/ai/video-status/" + taskId + "?provider=" + provider + _audioParam)
       .then(window._sj)
       .then(function (data) {
         if (data.status === "SUCCEEDED" && data.video_url) {
